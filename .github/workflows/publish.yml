@@ -1,0 +1,52 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Publish
+
+on:
+  push:
+    branches:
+      - main
+
+defaults:
+  run:
+    shell: bash
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+jobs:
+  Publish:
+    runs-on: ubuntu-latest
+    # TODO: Re-introduce once ready
+    #    permissions:
+    #      id-token: write # Required for OIDC
+    #      contents: write
+
+    steps:
+      - name: "📥 Checkout"
+        uses: actions/checkout@v4
+
+      - name: "⚙️ Configure Git"
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: "📦 Setup pnpm"
+        uses: pnpm/action-setup@v4
+
+      - name: "🗃️ Setup Node"
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: "📐 Install dependencies"
+        run: pnpm install --frozen-lockfile
+
+      - name: "🏗️ Build"
+        run: pnpm build
+# TODO: Re-introduce once ready
+#      - name: "📤 Publish"
+#        run: pnpm changeset publish
+#
+# TODO: Re-introduce once ready
+#      - name: "🏷️ Push tags"
+#        run: git push --tags

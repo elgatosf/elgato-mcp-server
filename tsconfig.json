@@ -1,0 +1,17 @@
+{
+    "compilerOptions": {
+        "strict": true,
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "lib": ["es2022"],
+        "module": "NodeNext",
+        "moduleResolution": "NodeNext",
+        "noImplicitOverride": true,
+        "noUncheckedIndexedAccess": true,
+        "outDir": "bin/",
+        "target": "es2022",
+        "verbatimModuleSyntax": true
+    },
+    "include": ["src/"],
+    "exclude": ["node_modules/"]
+}
