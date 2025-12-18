@@ -11,7 +11,7 @@ defaults:
     shell: bash
 
 jobs:
-  Publish:
+  Build:
     runs-on: ubuntu-latest
 
     steps:
