@@ -51,14 +51,20 @@ import { type McpTool, type ServerInfoResponse, StreamDeckClient } from "./strea
 // Configuration
 // ============================================================================
 
+/**
+ * Configuration for the MCP bridge.
+ */
 interface Config {
-	transport: "stdio" | "http";
+	/** Transport mode: stdio or http */
+	transport: "http" | "stdio";
+	/** Port number for HTTP transport */
 	port: number;
 }
 
 /**
  * Parse command-line arguments to determine transport mode and configuration.
  * Uses Node.js built-in util.parseArgs() for robust argument parsing.
+ * @returns Parsed configuration object
  */
 function parseArgs(): Config {
 	const options = {
@@ -194,6 +200,8 @@ async function discoverServerAndTools(): Promise<void> {
 
 /**
  * Convert Stream Deck tool descriptors to MCP Tool format.
+ * @param tools - Array of Stream Deck tool descriptors
+ * @returns Array of MCP Tool objects
  */
 function convertToMcpTools(tools: McpTool[]): Tool[] {
 	return tools.map((tool) => ({
@@ -236,6 +244,8 @@ function convertToMcpTools(tools: McpTool[]): Tool[] {
  *
  * For more details on McpServer vs Server APIs, see:
  * https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/server.md
+ * @param serverInfo - Server information from Stream Deck
+ * @returns Configured MCP server instance
  */
 function createServer(serverInfo: ServerInfoResponse): McpServer {
 	const server = new McpServer(
@@ -291,6 +301,7 @@ function createServer(serverInfo: ServerInfoResponse): McpServer {
 
 /**
  * Start the MCP server with stdio transport.
+ * @param server - The MCP server instance to connect
  */
 async function startStdioTransport(server: McpServer): Promise<void> {
 	const transport = new StdioServerTransport();
@@ -300,6 +311,7 @@ async function startStdioTransport(server: McpServer): Promise<void> {
 
 /**
  * Start the MCP server with HTTP transport.
+ * @param port - Port number for the HTTP server
  */
 async function startHttpTransport(port: number): Promise<void> {
 	const app = express();
@@ -438,6 +450,10 @@ async function startHttpTransport(port: number): Promise<void> {
 // Main Entry Point
 // ============================================================================
 
+/**
+ * Main entry point for the MCP bridge.
+ * Connects to Stream Deck, discovers tools, and starts the appropriate transport.
+ */
 async function main(): Promise<void> {
 	const config = parseArgs();
 
