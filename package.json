@@ -13,7 +13,18 @@
         "bin/"
     ],
     "scripts": {
-        "build": "tsc"
+        "build": "tsc",
+        "lint": "eslint --max-warnings 0",
+        "lint:fix": "prettier . --write",
+        "start": "node bin/index.js",
+        "http": "node bin/index.js --http",
+        "ngrok": "node bin/index.js --http --ngrok",
+        "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+        "test:unit": "node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPatterns=unit",
+        "test:integration": "node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPatterns=integration",
+        "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch",
+        "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage",
+        "test:ci": "node --experimental-vm-modules node_modules/jest/bin/jest.js --ci --coverage --maxWorkers=2"
     },
     "author": {
         "name": "Elgato",
@@ -29,9 +40,27 @@
     "homepage": "https://github.com/elgatosf/streamdeck-mcp#readme",
     "license": "MIT",
     "packageManager": "pnpm@10.26.0",
+    "prettier": "@elgato/prettier-config",
+    "dependencies": {
+        "@modelcontextprotocol/sdk": "^1.0.0",
+        "@ngrok/ngrok": "^1.6.0",
+        "cors": "^2.8.5",
+        "express": "^5.2.1"
+    },
     "devDependencies": {
         "@changesets/cli": "^2.29.8",
+        "@elgato/eslint-config": "^0.3.1",
+        "@elgato/prettier-config": "^0.3.3",
+        "@jest/globals": "^30.2.0",
+        "@types/cors": "^2.8.5",
+        "@types/express": "^5.0.6",
+        "@types/jest": "^30.0.0",
         "@types/node": "^25.0.3",
+        "eslint": "^9.39.2",
+        "jest": "^30.2.0",
+        "prettier": "3.7.4",
+        "ts-jest": "^29.4.6",
+        "ts-node": "^10.9.2",
         "typescript": "^5.9.3"
     }
 }

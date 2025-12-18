@@ -11,7 +11,7 @@ defaults:
     shell: bash
 
 jobs:
-  Publish:
+  Build:
     runs-on: ubuntu-latest
 
     steps:
@@ -32,3 +32,6 @@ jobs:
 
       - name: "🏗️ Build"
         run: pnpm build
+
+      - name: "🖌️ Lint"
+        run: pnpm lint

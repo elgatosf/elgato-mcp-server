@@ -43,6 +43,9 @@ jobs:
 
       - name: "🏗️ Build"
         run: pnpm build
+
+      - name: "🖌️ Lint"
+        run: pnpm lint
 # TODO: Re-introduce once ready
 #      - name: "📤 Publish"
 #        run: pnpm changeset publish
