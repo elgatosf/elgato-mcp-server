@@ -20,9 +20,6 @@ importers:
       express:
         specifier: ^5.2.1
         version: 5.2.1
-      zod:
-        specifier: ^4.2.1
-        version: 4.2.1
     devDependencies:
       '@changesets/cli':
         specifier: ^2.29.8

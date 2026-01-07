@@ -1,38 +1,28 @@
 /**
  * Stream Deck IPC Client
  *
- * Connects to Stream Deck's local socket server and provides an interface
- * for calling methods on the MCP local server.
+ * Establishes and maintains IPC connection to Stream Deck application.
+ * Implements JSON-over-socket protocol with newline delimiters.
  *
- * Protocol (matches mcp_dom.h / serializer.h):
- *
- * Requests:
- *   ServerInfoRequest:  { id: string, method: "server_info" }
- *   ToolsListRequest:   { id: string, method: "tools_list" }
- *   CallToolRequest:    { id: string, method: "call_tool", toolName: string, arguments?: object }
- *
- * Responses:
- *   ServerInfoResponse: { id, name, version, title?, icons? }
- *   ListToolsResponse:  { id, result: { tools: Tool[] }, error? }
- *   CallToolResponse:   { id, result: object }
- *   ResponseBase:       { id, result?, error? }  (for errors)
+ * Protocol matches mcp_dom.h / serializer.h in Stream Deck codebase.
  */
+
 import * as net from "node:net";
+import * as fs from "node:fs";
+import { getSignalSocketPath, getSocketPath } from "./socket-path.js";
 
-import { getSocketDescription, getSocketPath } from "./socket-path.js";
-
-// Message framing: each JSON message is terminated by a newline (matches C++ side)
+/** Message delimiter for the JSON-over-socket protocol */
 const MESSAGE_DELIMITER = "\n";
 
-// ============================================================================
-// Protocol Types (matching mcp_dom.h)
-// ============================================================================
+// =============================================================================
+// Type Definitions
+// =============================================================================
 
-/** Base request fields */
+/** Base interface for all requests */
 interface RequestBase {
-	/** Request ID */
+	/** Unique request identifier */
 	id: string;
-	/** Method name */
+	/** Request method name */
 	method: string;
 }
 
@@ -48,392 +38,435 @@ interface ToolsListRequest extends RequestBase {
 	method: "tools_list";
 }
 
-/** Call tool request */
+/** Request for calling a tool on Stream Deck */
 interface CallToolRequest extends RequestBase {
-	/** Method name for call tool */
+	/** Method name for calling a tool */
 	method: "call_tool";
+	/** Arguments to pass to the tool */
+	arguments: Record<string, unknown>;
 	/** Name of the tool to call */
 	toolName: string;
-	/** Arguments for the tool */
-	arguments?: Record<string, unknown>;
 }
 
-/** Error structure (matches dom::Error) */
-export interface McpError {
+/** Error structure in responses */
+interface McpError {
 	/** Error message */
 	message: string;
-	/** Additional error data */
+	/** Optional additional error data */
 	data?: string;
 }
 
-/** Icon structure (matches dom::Icon) */
+/** Icon structure for tools and server info */
 export interface McpIcon {
-	/** Icon source URL */
+	/** Icon source URL or data */
 	src: string;
 	/** MIME type of the icon */
 	mimeType?: string;
-	/** Icon sizes */
+	/** Available icon sizes */
 	sizes?: string[];
-	/** Icon theme */
+	/** Icon theme variant */
 	theme?: "dark" | "light";
 }
 
-/** Tool annotations (matches dom::ToolAnnotations) */
+/** Tool annotations describing behavior hints */
 export interface ToolAnnotations {
-	/** Tool title */
+	/** Display title for the tool */
 	title?: string;
-	/** Read-only hint */
+	/** Whether the tool is read-only */
 	readOnlyHint?: boolean;
-	/** Destructive hint */
+	/** Whether the tool is destructive */
 	destructiveHint?: boolean;
-	/** Idempotent hint */
+	/** Whether the tool is idempotent */
 	idempotentHint?: boolean;
-	/** Open world hint */
+	/** Whether the tool operates in an open world */
 	openWorldHint?: boolean;
 }
 
-/** Tool definition from C++ side (matches dom::Tool) */
+/** Tool definition from Stream Deck */
 export interface McpTool {
 	/** Tool name */
 	name: string;
-	/** Tool title */
+	/** Display title */
 	title?: string;
 	/** Tool description */
 	description?: string;
-	/** Input schema */
+	/** JSON schema for tool inputs */
 	inputSchema: Record<string, unknown>;
-	/** Output schema */
+	/** JSON schema for tool outputs */
 	outputSchema?: Record<string, unknown>;
-	/** Tool annotations */
+	/** Tool behavior annotations */
 	annotations?: ToolAnnotations;
 	/** Tool icons */
 	icons?: McpIcon[];
-	/** Metadata */
+	/** Additional metadata */
 	_meta?: Record<string, unknown>;
 }
 
 // ============================================================================
-// Response Types (matching mcp_dom.h hierarchy)
-// All response types extend ResponseBase which contains the `id` field
+// Response Types
 // ============================================================================
 
-/** Base response structure (matches dom::ResponseBase) */
+/** Base interface for all responses */
 interface ResponseBase {
-	/** Response ID */
+	/** Response identifier matching request */
 	id: string;
-	/** Response result */
+	/** Response result data */
 	result?: unknown;
-	/** Response error */
+	/** Error information if failed */
 	error?: McpError;
 }
 
-/** Server info response (matches dom::ServerInfoResponse : ResponseBase) */
+/** Server info response from Stream Deck */
 export interface ServerInfoResponse extends ResponseBase {
-	/** Server name */
-	name: string;
-	/** Server version */
-	version: string;
-	/** Server title */
-	title?: string;
-	/** Server icons */
-	icons?: McpIcon[];
+	/** Result containing server info */
+	result: {
+		/** Server name */
+		name: string;
+		/** Server version */
+		version: string;
+		/** Display title */
+		title?: string;
+		/** Server icons */
+		icons?: McpIcon[];
+	};
 }
 
-/** Tools list response (matches dom::ListToolsResponse : ResponseBase) */
+/** Tools list response from Stream Deck */
 export interface ToolsListResponse extends ResponseBase {
-	/** Response result */
+	/** Result containing tools array */
 	result: {
-		/** List of tools */
+		/** Array of available tools */
 		tools: McpTool[];
 	};
 }
 
-/** Call tool response (matches dom::CallToolResponse : ResponseBase) */
-interface CallToolResponse extends ResponseBase {
-	/** Response result */
-	result: unknown;
+/** Call tool response from Stream Deck */
+export interface CallToolResponse extends ResponseBase {
+	/** Result of tool execution */
+	result?: unknown;
 }
 
-/** Pending request structure */
+/** Pending request tracking with timeout handling */
 interface PendingRequest {
-	/** Resolve function */
-	resolve: (result: unknown) => void;
-	/** Reject function */
+	/** Promise resolve function */
+	resolve: (response: ResponseBase) => void;
+	/** Promise reject function */
 	reject: (error: Error) => void;
-	/** Timeout handle */
+	/** Timeout handle for cleanup */
 	timeout: NodeJS.Timeout;
 }
 
+// =============================================================================
+// StreamDeckClient Class
+// =============================================================================
+
 /**
- * Stream Deck IPC client for communicating with Stream Deck's local socket server.
+ * Client for communicating with Stream Deck via local IPC socket.
+ *
+ * Features:
+ * - Request/response correlation with unique IDs
+ * - 30-second request timeout
+ * - Signal-based reconnection mechanism
+ * - 1MB maximum buffer size protection
  */
 export class StreamDeckClient {
-	// Class properties (alphabetically ordered)
-	/** Buffer for incoming data */
+	/** Incoming data buffer */
 	private buffer = "";
-	/** Connection status */
-	private connected = false;
-	/** Initial retry delay in milliseconds */
-	private readonly initialRetryDelay = 500; // ms
-	/** Maximum number of connection retries */
-	private readonly maxRetries = 10;
-	/** Maximum retry delay in milliseconds */
-	private readonly maxRetryDelay = 30000; // ms
-	/** Map of pending requests */
-	private pendingRequests = new Map<number | string, PendingRequest>();
-	/** Request ID counter */
-	private requestId = 0;
-	/** Request timeout in milliseconds */
-	private readonly requestTimeout = 30000; // ms
+
+	/** Maximum buffer size to prevent memory exhaustion (1MB) */
+	private readonly maxBufferSize = 1024 * 1024;
+
+	/** Map of pending requests awaiting responses */
+	private pendingRequests = new Map<string, PendingRequest>();
+
+	/** Callback invoked when Stream Deck becomes ready */
+	private readyCallback: (() => void) | null = null;
+
+	/** Counter for generating unique request IDs */
+	private requestCounter = 0;
+
+	/** Request timeout in milliseconds (30 seconds) */
+	private readonly requestTimeout = 30_000;
+
+	/** Server listening for ready signals from Stream Deck */
+	private signalServer: net.Server | null = null;
+
 	/** Socket connection to Stream Deck */
 	private socket: net.Socket | null = null;
 
 	/**
-	 * Call a tool on Stream Deck.
+	 * Calls a tool on Stream Deck.
 	 * @param toolName - Name of the tool to call
-	 * @param args - Arguments for the tool
-	 * @returns Promise resolving to the tool result
+	 * @param args - Arguments to pass to the tool
+	 * @returns Promise resolving to the tool call response
 	 */
-	public async callTool(toolName: string, args: Record<string, unknown> = {}): Promise<unknown> {
+	public async callTool(
+		toolName: string,
+		args: Record<string, unknown>,
+	): Promise<CallToolResponse> {
 		const request: CallToolRequest = {
-			id: String(++this.requestId),
+			id: this.nextId(),
 			method: "call_tool",
 			toolName,
 			arguments: args,
 		};
-		const response = (await this.sendRequest(request)) as CallToolResponse;
-		return response.result;
+		const response = await this.sendRequest(request);
+		return response as CallToolResponse;
 	}
 
 	/**
-	 * Connect to Stream Deck's local socket server with retry logic.
+	 * Attempts to connect to Stream Deck with a timeout.
+	 * @param timeoutMs - Connection timeout in milliseconds
+	 * @returns Promise that resolves to true if connected, false if timed out
 	 */
-	public async connect(): Promise<void> {
-		const socketPath = getSocketPath();
-		let retries = 0;
-		let delay = this.initialRetryDelay;
+	public connect(timeoutMs = 1000): Promise<boolean> {
+		return new Promise((resolve) => {
+			const socketPath = getSocketPath();
+			const socket = net.createConnection({ path: socketPath });
+			let settled = false;
 
-		while (retries < this.maxRetries) {
-			try {
-				await this.attemptConnection(socketPath);
-				console.error(`[MCP Bridge] Connected to ${getSocketDescription()}`);
-				return;
-			} catch (error) {
-				retries++;
-				if (retries >= this.maxRetries) {
-					throw new Error(`Failed to connect to Stream Deck after ${this.maxRetries} attempts: ${error}`);
+			const timeout = setTimeout(() => {
+				if (!settled) {
+					settled = true;
+					socket.destroy();
+					resolve(false);
 				}
+			}, timeoutMs);
 
-				console.error(
-					`[MCP Bridge] Connection attempt ${retries}/${this.maxRetries} failed, ` + `retrying in ${delay}ms...`,
-				);
+			socket.on("connect", () => {
+				if (!settled) {
+					settled = true;
+					clearTimeout(timeout);
+					this.socket = socket;
+					this.setupSocketHandlers();
+					console.error("[MCP Bridge] Connected to Stream Deck");
+					resolve(true);
+				} else {
+					// Timeout already fired, clean up
+					socket.destroy();
+				}
+			});
 
-				await this.sleep(delay);
-				// Exponential backoff with jitter
-				delay = Math.min(delay * 2 + Math.random() * 100, this.maxRetryDelay);
-			}
-		}
-	}
-
-	/**
-	 * Disconnect from Stream Deck.
-	 */
-	public disconnect(): void {
-		if (this.socket) {
-			this.socket.destroy();
-			this.socket = null;
-		}
-		this.connected = false;
-		this.clearPendingRequests(new Error("Disconnected"));
-	}
-
-	/**
-	 * Get server info from Stream Deck.
-	 * @returns Promise resolving to server info response
-	 */
-	public async getServerInfo(): Promise<ServerInfoResponse> {
-		const request: ServerInfoRequest = {
-			id: String(++this.requestId),
-			method: "server_info",
-		};
-		return this.sendRequest(request) as Promise<ServerInfoResponse>;
-	}
-
-	/**
-	 * Get list of available tools from Stream Deck.
-	 * @returns Promise resolving to tools list response
-	 */
-	public async getToolsList(): Promise<ToolsListResponse> {
-		const request: ToolsListRequest = {
-			id: String(++this.requestId),
-			method: "tools_list",
-		};
-		return this.sendRequest(request) as Promise<ToolsListResponse>;
-	}
-
-	/**
-	 * Check if connected to Stream Deck.
-	 * @returns True if connected
-	 */
-	public isConnected(): boolean {
-		return this.connected;
-	}
-
-	/**
-	 * Attempt a single connection to the socket.
-	 * @param socketPath - Path to the socket
-	 * @returns Promise that resolves when connected
-	 */
-	private attemptConnection(socketPath: string): Promise<void> {
-		return new Promise((resolve, reject) => {
-			this.socket = net.createConnection(socketPath);
-
-			/** Handle successful connection */
-			const onConnect = (): void => {
-				this.connected = true;
-				this.socket?.removeListener("error", onError);
-				resolve();
-			};
-
-			/**
-			 * Handle connection error
-			 * @param error - Connection error
-			 */
-			const onError = (error: Error): void => {
-				this.socket?.removeListener("connect", onConnect);
-				this.socket?.destroy();
-				this.socket = null;
-				reject(error);
-			};
-
-			this.socket.once("connect", onConnect);
-			this.socket.once("error", onError);
-
-			this.socket.on("data", (data) => this.onData(data));
-			this.socket.on("close", () => this.onClose());
-			this.socket.on("error", (error) => this.onError(error));
+			socket.on("error", () => {
+				if (!settled) {
+					settled = true;
+					clearTimeout(timeout);
+					resolve(false);
+				}
+			});
 		});
 	}
 
 	/**
-	 * Clear all pending requests with an error.
-	 * @param error - Error to reject pending requests with
+	 * Disconnects from Stream Deck and cleans up resources.
 	 */
-	private clearPendingRequests(error: Error): void {
-		for (const [, pending] of this.pendingRequests) {
+	public disconnect(): void {
+		// Reject all pending requests
+		for (const [id, pending] of this.pendingRequests) {
 			clearTimeout(pending.timeout);
-			pending.reject(error);
+			pending.reject(new Error("Connection closed"));
+			this.pendingRequests.delete(id);
 		}
-		this.pendingRequests.clear();
+
+		if (this.socket) {
+			this.socket.destroy();
+			this.socket = null;
+		}
+
+		this.buffer = "";
+		console.error("[MCP Bridge] Disconnected from Stream Deck");
 	}
 
 	/**
-	 * Handle incoming message from Stream Deck.
-	 * All response types extend ResponseBase and have an `id` field (matches mcp_dom.h).
-	 * @param message - JSON message string
+	 * Gets server information from Stream Deck.
+	 * @returns Promise resolving to server info response
 	 */
-	private handleMessage(message: string): void {
-		console.error(`[MCP Bridge] Received message: ${message}`);
-		try {
-			const response = JSON.parse(message) as ResponseBase;
+	public async getServerInfo(): Promise<ServerInfoResponse> {
+		const request: ServerInfoRequest = {
+			id: this.nextId(),
+			method: "server_info",
+		};
+		const response = await this.sendRequest(request);
+		return response as ServerInfoResponse;
+	}
 
-			if (response.id === null || response.id === undefined) {
-				// Notification from server (no id), ignore for now
-				return;
+	/**
+	 * Gets the list of available tools from Stream Deck.
+	 * @returns Promise resolving to the tools list response
+	 */
+	public async getToolsList(): Promise<ToolsListResponse> {
+		const request: ToolsListRequest = {
+			id: this.nextId(),
+			method: "tools_list",
+		};
+		const response = await this.sendRequest(request);
+		return response as ToolsListResponse;
+	}
+
+	/**
+	 * Checks if the client is currently connected to Stream Deck.
+	 * @returns True if connected, false otherwise
+	 */
+	public isConnected(): boolean {
+		return this.socket !== null && !this.socket.destroyed;
+	}
+
+	/**
+	 * Registers a callback to be invoked when Stream Deck connects/reconnects.
+	 * @param callback - Function to call on connection
+	 */
+	public onConnected(callback: () => void): void {
+		this.readyCallback = callback;
+	}
+
+	/**
+	 * Starts listening for ready signals from Stream Deck.
+	 * Stream Deck will connect to this socket when it becomes available.
+	 */
+	public startSignalServer(): void {
+		const signalPath = getSignalSocketPath();
+
+		// Clean up existing socket file on Unix platforms
+		if (process.platform === "darwin") {
+			try {
+				fs.unlinkSync(signalPath);
+			} catch {
+				// Socket file doesn't exist, which is fine
 			}
+		}
 
-			const pending = this.pendingRequests.get(response.id);
-			if (!pending) {
-				console.error(`[MCP Bridge] Received response for unknown request: ${response.id}`);
-				return;
+		this.signalServer = net.createServer((clientSocket) => {
+			console.error("[MCP Bridge] Received ready signal from Stream Deck");
+			if (this.readyCallback) {
+				this.readyCallback();
 			}
+			clientSocket.end();
+		});
 
-			this.pendingRequests.delete(response.id);
-			clearTimeout(pending.timeout);
+		this.signalServer.on("error", (error) => {
+			console.error("[MCP Bridge] Signal server error:", error.message);
+		});
 
-			if (response.error) {
-				pending.reject(new Error(response.error.message));
-			} else {
-				pending.resolve(response);
-			}
-		} catch (error) {
-			console.error(`[MCP Bridge] Failed to parse response: ${error}`);
+		this.signalServer.listen(signalPath, () => {
+			console.error(`[MCP Bridge] Listening for signals on ${signalPath}`);
+		});
+	}
+
+	/**
+	 * Stops the signal server.
+	 */
+	public stopSignalServer(): void {
+		if (this.signalServer) {
+			this.signalServer.close();
+			this.signalServer = null;
 		}
 	}
 
+	// ===========================================================================
+	// Private Methods
+	// ===========================================================================
+
 	/**
-	 * Handle socket close event.
+	 * Generates the next unique request ID.
+	 * @returns The next unique request ID
 	 */
-	private onClose(): void {
-		console.error("[MCP Bridge] Connection to Stream Deck closed");
-		this.connected = false;
-		this.clearPendingRequests(new Error("Connection closed"));
+	private nextId(): string {
+		return String(++this.requestCounter);
 	}
 
 	/**
-	 * Handle incoming data from the socket.
-	 * @param data - Data received from the socket
+	 * Handles incoming data from the socket.
+	 * @param data - Raw data received from socket
 	 */
 	private onData(data: Buffer | string): void {
 		this.buffer += data.toString();
-		this.processBuffer();
-	}
 
-	/**
-	 * Handle socket error event.
-	 * @param error - Error that occurred
-	 */
-	private onError(error: Error): void {
-		console.error(`[MCP Bridge] Socket error: ${error.message}`);
-	}
+		// Buffer overflow protection
+		if (this.buffer.length > this.maxBufferSize) {
+			console.error("[MCP Bridge] Buffer overflow, disconnecting");
+			this.disconnect();
+			return;
+		}
 
-	/**
-	 * Process the buffer to extract complete messages.
-	 */
-	private processBuffer(): void {
+		// Process complete messages
 		let delimiterIndex: number;
 		while ((delimiterIndex = this.buffer.indexOf(MESSAGE_DELIMITER)) !== -1) {
-			const message = this.buffer.slice(0, delimiterIndex);
+			const messageStr = this.buffer.slice(0, delimiterIndex);
 			this.buffer = this.buffer.slice(delimiterIndex + 1);
 
-			if (message.trim()) {
-				this.handleMessage(message);
+			if (messageStr.trim()) {
+				this.processMessage(messageStr);
 			}
 		}
 	}
 
 	/**
-	 * Send a request to Stream Deck and wait for response.
-	 * @param request - Request to send
+	 * Processes a complete JSON message.
+	 * @param messageStr - The JSON message string to process
+	 */
+	private processMessage(messageStr: string): void {
+		try {
+			const response = JSON.parse(messageStr) as ResponseBase;
+
+			const pending = this.pendingRequests.get(response.id);
+			if (pending) {
+				clearTimeout(pending.timeout);
+				this.pendingRequests.delete(response.id);
+				pending.resolve(response);
+			} else {
+				console.error(
+					`[MCP Bridge] Received response for unknown request: ${response.id}`,
+				);
+			}
+		} catch (error) {
+			console.error("[MCP Bridge] Failed to parse message:", error);
+		}
+	}
+
+	/**
+	 * Sends a request and waits for the response.
+	 * @param request - The request to send
 	 * @returns Promise resolving to the response
 	 */
-	private sendRequest(request: RequestBase): Promise<unknown> {
-		if (!this.connected || !this.socket) {
-			throw new Error("Not connected to Stream Deck");
-		}
-
+	private sendRequest(request: RequestBase): Promise<ResponseBase> {
 		return new Promise((resolve, reject) => {
+			if (!this.isConnected()) {
+				reject(new Error("Not connected to Stream Deck"));
+				return;
+			}
+
 			const timeout = setTimeout(() => {
 				this.pendingRequests.delete(request.id);
 				reject(new Error(`Request timeout for method: ${request.method}`));
 			}, this.requestTimeout);
 
-			this.pendingRequests.set(request.id, { resolve, reject, timeout });
+			this.pendingRequests.set(request.id, {
+				resolve,
+				reject,
+				timeout,
+			});
 
 			const message = JSON.stringify(request) + MESSAGE_DELIMITER;
-
-			console.error(`[MCP Bridge] Sending message: ${message}`);
-
 			this.socket!.write(message);
 		});
 	}
 
 	/**
-	 * Sleep for a specified duration.
-	 * @param ms - Milliseconds to sleep
-	 * @returns Promise that resolves after the specified duration
+	 * Sets up socket event handlers.
 	 */
-	private sleep(ms: number): Promise<void> {
-		return new Promise((resolve) => setTimeout(resolve, ms));
+	private setupSocketHandlers(): void {
+		if (!this.socket) return;
+
+		this.socket.on("data", (data: Buffer) => this.onData(data));
+
+		this.socket.on("close", () => {
+			console.error("[MCP Bridge] Connection to Stream Deck closed");
+			this.disconnect();
+		});
+
+		this.socket.on("error", (error: Error) => {
+			console.error("[MCP Bridge] Socket error:", error.message);
+			this.disconnect();
+		});
 	}
 }

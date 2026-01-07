@@ -1,20 +1,21 @@
 #!/usr/bin/env node
 /**
- * Stream Deck MCP Bridge
+ * Stream Deck MCP Bridge - Main Entry Point
  *
- * This bridge connects Claude Desktop to Stream Deck via the MCP protocol.
+ * Provides a protocol bridge between MCP clients and Stream Deck automation.
+ * Supports both stdio (for desktop integration) and HTTP (for web clients) transports.
  *
  * Architecture:
- *   Claude Desktop <--MCP Transport--> This Bridge <--Unix Socket--> Stream Deck
+ *   MCP Client <--MCP Transport--> This Bridge <--Unix Socket--> Stream Deck
  *
  * The bridge:
- * 1. Connects to Stream Deck's local socket server (MCPLocalServer)
+ * 1. Connects to Stream Deck's local socket server
  * 2. Dynamically discovers available tools from Stream Deck
  * 3. Exposes Stream Deck's tools via the MCP protocol
- * 4. Communicates with Claude Desktop via stdio or HTTP transport
+ * 4. Communicates with MCP Clients via stdio or HTTP transport
  *
  * Transport Modes:
- *   - stdio (default): Standard input/output for Claude Desktop integration
+ *   - stdio (default): Standard input/output e.g. for Claude Desktop integration
  *   - http: Streamable HTTP transport for web-based clients
  *
  * Tool Discovery:
@@ -22,205 +23,253 @@
  *   it calls `server_info` and `tools_list` methods on Stream Deck to get the
  *   server metadata and list of available tools. This ensures the single source
  *   of truth for tool definitions is the C++ code (register_tools.cpp).
- *
- * Protocol (matches mcp_dom.h):
- *   - server_info: Returns server name, version, title, icons
- *   - tools_list:  Returns array of Tool objects
- *   - call_tool:   Invokes a tool by name with arguments
  */
+
+import { randomUUID } from "node:crypto";
+import { parseArgs } from "node:util";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
-	CallToolRequestSchema,
-	type CallToolResult,
-	isInitializeRequest,
 	ListToolsRequestSchema,
+	CallToolRequestSchema,
+	isInitializeRequest,
 	type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
-import ngrok from "@ngrok/ngrok";
+import express, { type Request, type Response } from "express";
 import cors from "cors";
-import express from "express";
-import { randomUUID } from "node:crypto";
-import { parseArgs as utilParseArgs } from "node:util";
+import ngrok from "@ngrok/ngrok";
 
+import {
+	StreamDeckClient,
+	type McpTool,
+	type ServerInfoResponse,
+} from "./stream-deck-client.js";
 import { getSocketDescription } from "./socket-path.js";
-import { type McpTool, type ServerInfoResponse, StreamDeckClient } from "./stream-deck-client.js";
 
-// ============================================================================
-// Configuration
-// ============================================================================
+// =============================================================================
+// Configuration Types
+// =============================================================================
 
-/**
- * Configuration for the MCP bridge.
- */
+/** Application configuration */
 interface Config {
-	/** Transport mode: stdio or http */
+	/** Transport mode - stdio or http */
 	transport: "http" | "stdio";
-	/** Port number for HTTP transport */
+	/** HTTP server port number */
 	port: number;
+	/** Whether to enable ngrok tunnel */
+	enableNgrok: boolean;
 }
 
+// =============================================================================
+// Default Values
+// =============================================================================
+
+const DEFAULT_SERVER_INFO: ServerInfoResponse = {
+	id: "0",
+	result: {
+		name: "Stream Deck MCP Server",
+		version: "1.0.0",
+	},
+};
+
+const DEFAULT_PORT = 9090;
+
+// =============================================================================
+// Global State
+// =============================================================================
+
+let cachedTools: McpTool[] = [];
+let serverInfo: ServerInfoResponse = DEFAULT_SERVER_INFO;
+const streamDeckClient = new StreamDeckClient();
+
+// Track active MCP server sessions for HTTP mode
+const activeTransports = new Map<string, StreamableHTTPServerTransport>();
+const serversByTransport = new Map<StreamableHTTPServerTransport, McpServer>();
+
+// HTTP server instance for cleanup
+let httpServerInstance: ReturnType<typeof express.application.listen> | null =
+	null;
+
+// =============================================================================
+// Command-Line Argument Parsing
+// =============================================================================
+
 /**
- * Parse command-line arguments to determine transport mode and configuration.
- * Uses Node.js built-in util.parseArgs() for robust argument parsing.
+ * Parses command-line arguments using node:util parseArgs.
  * @returns Parsed configuration object
  */
-function parseArgs(): Config {
-	const options = {
-		transport: {
-			type: "string" as const,
+function parseCommandLineArgs(): Config {
+	const { values } = parseArgs({
+		options: {
+			transport: {
+				type: "string",
+				short: "t",
+			},
+			http: {
+				type: "boolean",
+			},
+			port: {
+				type: "string",
+				short: "p",
+			},
+			ngrok: {
+				type: "boolean",
+			},
+			help: {
+				type: "boolean",
+				short: "h",
+			},
 		},
-		http: {
-			type: "boolean" as const,
-		},
-		port: {
-			type: "string" as const,
-		},
-		help: {
-			type: "boolean" as const,
-			short: "h",
-		},
-	};
+		strict: true,
+	});
 
-	let parsed;
-	try {
-		parsed = utilParseArgs({
-			options,
-			strict: true,
-			allowPositionals: false,
-		});
-	} catch (error) {
-		console.error(`[MCP Bridge] Error parsing arguments: ${error instanceof Error ? error.message : error}`);
-		console.error(`[MCP Bridge] Use --help for usage information.`);
-		process.exit(1);
-	}
-
-	// Handle help flag
-	if (parsed.values.help) {
-		console.error(`
-Stream Deck MCP Bridge
-
-Usage: streamdeck-mcp-bridge [options]
-
-Options:
-  --transport <mode>  Transport mode: 'stdio' (default) or 'http'
-  --http              Shorthand for --transport http
-  --port <number>     HTTP server port (default: 9090), enables HTTP transport mode if other not provided
-  --help, -h          Show this help message
-
-Examples:
-  streamdeck-mcp-bridge                    # Use stdio transport (default)
-  streamdeck-mcp-bridge --http             # Use HTTP transport on port 9090
-  streamdeck-mcp-bridge --transport http --port 3000
-      `);
+	if (values.help) {
+		printHelp();
 		process.exit(0);
 	}
 
-	// Initialize config with defaults
 	const config: Config = {
 		transport: "stdio",
-		port: 9090,
+		port: DEFAULT_PORT,
+		enableNgrok: false,
 	};
 
-	// Handle --http flag (shorthand for --transport http)
-	if (parsed.values.http) {
+	// Handle --http shorthand
+	if (values.http) {
 		config.transport = "http";
 	}
 
-	// Handle --port option
-	if (parsed.values.port !== undefined) {
-		const port = parseInt(parsed.values.port, 10);
+	// Handle --transport (overrides --http if both provided)
+	if (values.transport) {
+		if (values.transport !== "http" && values.transport !== "stdio") {
+			console.error(`Invalid transport mode: ${values.transport}`);
+			process.exit(1);
+		}
+		config.transport = values.transport;
+	}
+
+	// Handle --port
+	if (values.port) {
+		const port = parseInt(values.port, 10);
 		if (isNaN(port) || port < 1 || port > 65535) {
-			console.error(`[MCP Bridge] Invalid port: ${parsed.values.port}. Must be between 1 and 65535.`);
+			console.error(`Invalid port: ${values.port}`);
 			process.exit(1);
 		}
 		config.port = port;
-		config.transport = "http";
 	}
 
-	// Handle --transport option (overrides --http if both are provided)
-	if (parsed.values.transport !== undefined) {
-		const transport = parsed.values.transport;
-		if (transport === "stdio" || transport === "http") {
-			config.transport = transport;
-		} else {
-			console.error(`[MCP Bridge] Invalid transport: ${transport}. Use 'stdio' or 'http'.`);
-			process.exit(1);
-		}
+	// Handle --ngrok
+	if (values.ngrok) {
+		config.enableNgrok = true;
 	}
 
 	return config;
 }
 
-// ============================================================================
-// Global State
-// ============================================================================
-
-// Stream Deck client for IPC communication
-const streamDeckClient = new StreamDeckClient();
-
-// Cached server info and tool definitions from Stream Deck
-let cachedServerInfo: ServerInfoResponse | null = null;
-let cachedTools: McpTool[] = [];
-
-// ============================================================================
-// Tool Discovery
-// ============================================================================
-
 /**
- * Fetch server info and available tools from Stream Deck.
- * This is called once on startup to populate the caches.
+ * Prints the help message to stdout.
  */
-async function discoverServerAndTools(): Promise<void> {
-	console.error("[MCP Bridge] Discovering server info from Stream Deck...");
+function printHelp(): void {
+	console.log(`
+Usage: mcp-server-streamdeck [options]
 
-	// Get server info
-	cachedServerInfo = await streamDeckClient.getServerInfo();
-	console.error(
-		`[MCP Bridge] Server: ${cachedServerInfo.name} v${cachedServerInfo.version}` +
-			(cachedServerInfo.title ? ` (${cachedServerInfo.title})` : ""),
-	);
+Options:
+  --transport <mode>  Transport mode: 'stdio' (default) or 'http'
+  --http              Shorthand for --transport http
+  --port <number>     HTTP server port (default: ${DEFAULT_PORT})
+  --ngrok             Enable ngrok tunnel (requires NGROK_AUTHTOKEN env var)
+  --help, -h          Show help message
 
-	// Get tools list
-	console.error("[MCP Bridge] Discovering tools from Stream Deck...");
-	const toolsResponse = await streamDeckClient.getToolsList();
-
-	if (toolsResponse.error) {
-		throw new Error(`Failed to get tools: ${toolsResponse.error.message}`);
-	}
-
-	cachedTools = toolsResponse.result.tools;
-	console.error(`[MCP Bridge] Discovered ${cachedTools.length} tools:`);
-
-	for (const tool of cachedTools) {
-		console.error(`[MCP Bridge]   - ${tool.name}: ${tool.description ?? "(no description)"}`);
-	}
+Examples:
+  mcp-server-streamdeck                    # Start with stdio transport
+  mcp-server-streamdeck --http             # Start HTTP server on port ${DEFAULT_PORT}
+  mcp-server-streamdeck --http --port 3000 # Start HTTP server on port 3000
+  mcp-server-streamdeck --http --ngrok     # Start HTTP server with ngrok tunnel
+`);
 }
 
+// =============================================================================
+// Tool Conversion
+// =============================================================================
+
 /**
- * Convert Stream Deck tool descriptors to MCP Tool format.
- * @param tools - Array of Stream Deck tool descriptors
- * @returns Array of MCP Tool objects
+ * Converts Stream Deck tools to MCP Tool format.
+ * @param tools - Array of Stream Deck tools
+ * @returns Array of MCP-formatted tools
  */
 function convertToMcpTools(tools: McpTool[]): Tool[] {
-	return tools.map((tool) => ({
-		name: tool.name,
-		description: tool.description ?? tool.title ?? tool.name,
-		icons: tool.icons,
-		inputSchema: {
+	return tools.map((tool) => {
+		// Ensure inputSchema has the required 'type: "object"' field
+		// MCP protocol requires inputSchema.type to be exactly "object"
+		const inputSchema = {
 			type: "object" as const,
 			...tool.inputSchema,
-		},
-	}));
+		};
+
+		return {
+			name: tool.name,
+			description: tool.description ?? tool.title ?? tool.name,
+			icons: tool.icons,
+			inputSchema,
+			annotations: tool.annotations,
+		};
+	});
 }
 
-// ============================================================================
-// MCP Server Setup
-// ============================================================================
+// =============================================================================
+// Server and Tool Discovery
+// =============================================================================
 
 /**
- * Create and configure the MCP server with dynamic tool handling.
+ * Discovers server info and tools from Stream Deck.
+ */
+async function discoverServerAndTools(): Promise<void> {
+	if (!streamDeckClient.isConnected()) {
+		console.error("[MCP Bridge] Cannot discover tools - not connected");
+		return;
+	}
+
+	try {
+		// Get server info
+		const info = await streamDeckClient.getServerInfo();
+		serverInfo = info;
+		console.error(
+			`[MCP Bridge] Server: ${info.result.name} v${info.result.version}${info.result.title ? ` (${info.result.title})` : ""}`,
+		);
+
+		// Get tools list
+		const toolsResponse = await streamDeckClient.getToolsList();
+		if (toolsResponse.result?.tools) {
+			cachedTools = toolsResponse.result.tools;
+			console.error(
+				`[MCP Bridge] Discovered ${cachedTools.length} tool(s) from Stream Deck`,
+			);
+		}
+	} catch (error) {
+		console.error("[MCP Bridge] Failed to discover tools:", error);
+	}
+}
+
+/**
+ * Notifies all active MCP sessions that tools have changed.
+ */
+async function notifyToolsChanged(): Promise<void> {
+	for (const mcpServer of serversByTransport.values()) {
+		try {
+			await mcpServer.server.sendToolListChanged();
+		} catch {
+			// Session may have been closed
+		}
+	}
+}
+
+// =============================================================================
+// MCP Server Factory
+// =============================================================================
+
+/**
+ * Creates and configures an MCP server instance.
  *
  * IMPORTANT: This bridge uses the low-level Server API (via server.server.setRequestHandler)
  * instead of the high-level McpServer.registerTool() API. Here's why:
@@ -244,267 +293,316 @@ function convertToMcpTools(tools: McpTool[]): Tool[] {
  *
  * For more details on McpServer vs Server APIs, see:
  * https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/server.md
- * @param serverInfo - Server information from Stream Deck
- * @returns Configured MCP server instance
+ * @returns Configured McpServer instance
  */
-function createServer(serverInfo: ServerInfoResponse): McpServer {
-	const server = new McpServer(
-		{ name: serverInfo.name, version: serverInfo.version, title: serverInfo.title, icons: serverInfo.icons },
-		{ capabilities: { tools: { listChanged: true } } },
+function createMcpServer(): McpServer {
+	const mcpServer = new McpServer(
+		{
+			name: serverInfo.result.name,
+			version: serverInfo.result.version,
+			icons: serverInfo.result.icons,
+			title: serverInfo.result.title,
+		},
+		{
+			capabilities: {
+				tools: { listChanged: true },
+			},
+		},
 	);
 
-	// Use low-level Server API for dynamic tool handling
-	// McpServer exposes the underlying Server instance via the 'server' property
-	// for advanced operations like setting custom request handlers
+	// Access the low-level server for custom request handlers
+	const server = mcpServer.server;
 
-	// Handle tools/list request - return dynamically discovered tools from Stream Deck
-	server.server.setRequestHandler(ListToolsRequestSchema, async () => {
-		return {
-			tools: convertToMcpTools(cachedTools),
-		};
+	// Custom ListTools handler - returns cached tools from Stream Deck
+	server.setRequestHandler(ListToolsRequestSchema, async () => {
+		console.error("[MCP Bridge] ListTools request received");
+		return { tools: convertToMcpTools(cachedTools) };
 	});
 
-	// Handle tools/call request - forward to Stream Deck
-	server.server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToolResult> => {
+	// Custom CallTool handler - forwards to Stream Deck
+	server.setRequestHandler(CallToolRequestSchema, async (request) => {
 		const { name, arguments: args } = request.params;
 
-		// Find the tool in our cache to validate it exists
-		const tool = cachedTools.find((t) => t.name === name);
-		if (!tool) {
+		if (!streamDeckClient.isConnected()) {
 			return {
-				content: [{ type: "text", text: `Unknown tool: ${name}` }],
+				content: [
+					{
+						type: "text" as const,
+						text: "Stream Deck is not connected. Please start Stream Deck and try again.",
+					},
+				],
 				isError: true,
 			};
 		}
 
 		try {
-			// Forward the tool call to Stream Deck
-			const result = await streamDeckClient.callTool(name, (args as Record<string, unknown>) ?? {});
+			const result = await streamDeckClient.callTool(
+				name,
+				args as Record<string, unknown>,
+			);
 
-			return {
-				content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-			};
-		} catch (error) {
-			return {
-				content: [{ type: "text", text: `Error: ${error}` }],
-				isError: true,
-			};
-		}
-	});
-
-	return server;
-}
-
-// ============================================================================
-// Transport Initialization
-// ============================================================================
-
-/**
- * Start the MCP server with stdio transport.
- * @param server - The MCP server instance to connect
- */
-async function startStdioTransport(server: McpServer): Promise<void> {
-	const transport = new StdioServerTransport();
-	await server.connect(transport);
-	console.error("[MCP Bridge] MCP server running on stdio transport");
-}
-
-/**
- * Start the MCP server with HTTP transport.
- * @param port - Port number for the HTTP server
- */
-async function startHttpTransport(port: number): Promise<void> {
-	const app = express();
-	app.use(cors());
-	app.use(express.json());
-
-	// Store active transports by session ID
-	const transports: Record<string, StreamableHTTPServerTransport> = {};
-
-	// POST /mcp - Handle MCP requests
-	app.post("/mcp", async (req, res) => {
-		try {
-			const sessionId = req.headers["mcp-session-id"] as string | undefined;
-			let transport: StreamableHTTPServerTransport;
-
-			if (sessionId && transports[sessionId]) {
-				// Reuse existing session
-				transport = transports[sessionId];
-			} else if (!sessionId && isInitializeRequest(req.body)) {
-				// New session initialization
-				if (!cachedServerInfo) {
-					res.status(500).json({
-						jsonrpc: "2.0",
-						error: { code: -32000, message: "Server info not available" },
-						id: null,
-					});
-					return;
-				}
-
-				transport = new StreamableHTTPServerTransport({
-					sessionIdGenerator: () => randomUUID(),
-					onsessioninitialized: (id) => {
-						transports[id] = transport;
-						console.error(`[MCP Bridge] HTTP session initialized: ${id}`);
-					},
-					onsessionclosed: (id) => {
-						delete transports[id];
-						console.error(`[MCP Bridge] HTTP session closed: ${id}`);
-					},
-				});
-
-				transport.onclose = () => {
-					if (transport.sessionId) {
-						delete transports[transport.sessionId];
-					}
+			if (result.error) {
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: JSON.stringify({
+								error: result.error.message,
+								details: result.error.data,
+							}),
+						},
+					],
+					isError: true,
 				};
-
-				// Create a new MCP server for this session
-				const server = createServer(cachedServerInfo);
-				await server.connect(transport);
-			} else {
-				res.status(400).json({
-					jsonrpc: "2.0",
-					error: { code: -32000, message: "Invalid session" },
-					id: null,
-				});
-				return;
 			}
 
-			await transport.handleRequest(req, res, req.body);
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: JSON.stringify(result.result ?? { success: true }),
+					},
+				],
+			};
 		} catch (error) {
-			console.error(`[MCP Bridge] Error handling POST request: ${error}`);
-			res.status(500).json({
-				jsonrpc: "2.0",
-				error: { code: -32000, message: `Internal error: ${error}` },
-				id: null,
-			});
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: error instanceof Error ? error.message : "Unknown error",
+					},
+				],
+				isError: true,
+			};
 		}
 	});
 
-	// GET /mcp - Handle SSE streams for notifications
-	app.get("/mcp", async (req, res) => {
-		try {
-			const sessionId = req.headers["mcp-session-id"] as string;
-			const transport = transports[sessionId];
+	return mcpServer;
+}
 
-			if (transport) {
-				await transport.handleRequest(req, res);
-			} else {
-				res.status(400).send("Invalid session");
-			}
-		} catch (error) {
-			console.error(`[MCP Bridge] Error handling GET request: ${error}`);
-			res.status(500).send(`Internal error: ${error}`);
-		}
-	});
+// =============================================================================
+// Transport Layer Implementations
+// =============================================================================
 
-	// DELETE /mcp - Handle session cleanup
-	app.delete("/mcp", async (req, res) => {
-		try {
-			const sessionId = req.headers["mcp-session-id"] as string;
-			const transport = transports[sessionId];
+/**
+ * Starts the MCP server with stdio transport.
+ */
+async function startStdioTransport(): Promise<void> {
+	console.error("[MCP Bridge] Starting with stdio transport");
 
-			if (transport) {
-				await transport.handleRequest(req, res);
-			} else {
-				res.status(400).send("Invalid session");
-			}
-		} catch (error) {
-			console.error(`[MCP Bridge] Error handling DELETE request: ${error}`);
-			res.status(500).send(`Internal error: ${error}`);
-		}
-	});
+	const server = createMcpServer();
+	const transport = new StdioServerTransport();
+
+	// Track for tool change notifications
+	serversByTransport.set(transport as unknown as StreamableHTTPServerTransport, server);
+
+	await server.connect(transport);
+	console.error("[MCP Bridge] MCP server connected via stdio");
+}
+
+/**
+ * Starts the MCP server with HTTP transport.
+ * @param config - Application configuration
+ */
+async function startHttpTransport(config: Config): Promise<void> {
+	console.error(`[MCP Bridge] Starting HTTP server on port ${config.port}`);
+
+	const app = express();
+	app.use(express.json());
+	app.use(cors());
 
 	// Health check endpoint
-	app.get("/health", (_req, res) => {
+	app.get("/health", (_req: Request, res: Response) => {
 		res.json({
 			status: "ok",
-			transport: "http",
-			streamDeckConnected: streamDeckClient.isConnected(),
-			activeSessions: Object.keys(transports).length,
+			connected: streamDeckClient.isConnected(),
+			toolCount: cachedTools.length,
 		});
+	});
+
+	// MCP POST endpoint - handles requests
+	app.post("/mcp", async (req: Request, res: Response) => {
+		const sessionId = req.headers["mcp-session-id"] as string | undefined;
+		let transport: StreamableHTTPServerTransport | undefined;
+
+		if (sessionId && activeTransports.has(sessionId)) {
+			// Reuse existing session
+			transport = activeTransports.get(sessionId);
+		} else if (!sessionId && isInitializeRequest(req.body)) {
+			// New session initialization
+			transport = new StreamableHTTPServerTransport({
+				sessionIdGenerator: () => randomUUID(),
+				onsessioninitialized: (id) => {
+					activeTransports.set(id, transport!);
+					console.error(`[MCP Bridge] Session initialized: ${id}`);
+				},
+				onsessionclosed: (id) => {
+					activeTransports.delete(id);
+					serversByTransport.delete(transport!);
+					console.error(`[MCP Bridge] Session closed: ${id}`);
+				},
+			});
+
+			transport.onclose = () => {
+				if (transport?.sessionId) {
+					activeTransports.delete(transport.sessionId);
+					serversByTransport.delete(transport);
+				}
+			};
+
+			const server = createMcpServer();
+			serversByTransport.set(transport, server);
+			await server.connect(transport);
+		} else {
+			res.status(400).json({
+				jsonrpc: "2.0",
+				error: { code: -32000, message: "Invalid session" },
+				id: null,
+			});
+			return;
+		}
+
+		if (transport) {
+			await transport.handleRequest(req, res, req.body);
+		}
+	});
+
+	// MCP GET endpoint - SSE stream
+	app.get("/mcp", async (req: Request, res: Response) => {
+		const sessionId = req.headers["mcp-session-id"] as string;
+		const transport = activeTransports.get(sessionId);
+
+		if (transport) {
+			await transport.handleRequest(req, res);
+		} else {
+			res.status(400).send("Invalid session");
+		}
+	});
+
+	// MCP DELETE endpoint - session cleanup
+	app.delete("/mcp", async (req: Request, res: Response) => {
+		const sessionId = req.headers["mcp-session-id"] as string;
+		const transport = activeTransports.get(sessionId);
+
+		if (transport) {
+			await transport.handleRequest(req, res);
+		} else {
+			res.status(400).send("Invalid session");
+		}
 	});
 
 	// Start HTTP server
-	return new Promise((resolve, reject) => {
-		const server = app.listen(port, () => {
-			console.error(`[MCP Bridge] HTTP server listening on http://localhost:${port}/mcp`);
-			console.error(`[MCP Bridge] Health check available at http://localhost:${port}/health`);
-			resolve();
-		});
-
-		server.on("error", (error: NodeJS.ErrnoException) => {
-			if (error.code === "EADDRINUSE") {
-				console.error(`[MCP Bridge] Port ${port} is already in use`);
-				reject(new Error(`Port ${port} is already in use. Try a different port with --port <number>`));
-			} else {
-				console.error(`[MCP Bridge] HTTP server error: ${error.message}`);
-				reject(error);
-			}
-		});
+	httpServerInstance = app.listen(config.port, () => {
+		console.error(`[MCP Bridge] HTTP server listening on port ${config.port}`);
 	});
-}
 
-// ============================================================================
-// Main Entry Point
-// ============================================================================
-
-/**
- * Main entry point for the MCP bridge.
- * Connects to Stream Deck, discovers tools, and starts the appropriate transport.
- */
-async function main(): Promise<void> {
-	const config = parseArgs();
-
-	console.error("[MCP Bridge] Starting Stream Deck MCP Bridge...");
-	console.error(`[MCP Bridge] Transport mode: ${config.transport}`);
-	console.error(`[MCP Bridge] Connecting to ${getSocketDescription()}`);
-
-	try {
-		// Connect to Stream Deck's local socket server
-		await streamDeckClient.connect();
-
-		// Discover server info and available tools from Stream Deck
-		await discoverServerAndTools();
-
-		if (!cachedServerInfo) {
-			throw new Error("Failed to get server info");
-		}
-
-		// Initialize transport based on configuration
-		if (config.transport === "stdio") {
-			// Create MCP server with discovered server info
-			const server = createServer(cachedServerInfo);
-			await startStdioTransport(server);
+	// Set up ngrok tunnel if enabled
+	if (config.enableNgrok) {
+		if (!process.env["NGROK_AUTHTOKEN"]) {
+			console.error(
+				"[MCP Bridge] Warning: NGROK_AUTHTOKEN not set, ngrok tunnel disabled",
+			);
 		} else {
-			// HTTP transport - servers are created per-session
-			await startHttpTransport(config.port);
-
-			// Get your endpoint online
-			ngrok
-				.connect({ addr: config.port, authtoken_from_env: true })
-				.then((listener) => console.error(`Ingress established at: ${listener.url()}`))
-				.catch((error) => console.error(`Failed to establish ingress: ${error}`));
+			await ngrok.forward({
+				addr: config.port,
+				authtoken_from_env: true,
+			}).then((listener) => {
+				console.error(`[MCP Bridge] ngrok tunnel: ${listener.url()}`);
+				return listener;
+			}).catch((error) => {
+				console.error("[MCP Bridge] Failed to start ngrok tunnel:", error);
+				return null;
+			});
 		}
-
-		// Handle graceful shutdown
-		const shutdown = async () => {
-			console.error("[MCP Bridge] Shutting down...");
-			streamDeckClient.disconnect();
-			process.exit(0);
-		};
-
-		process.on("SIGINT", shutdown);
-		process.on("SIGTERM", shutdown);
-	} catch (error) {
-		console.error(`[MCP Bridge] Fatal error: ${error}`);
-		process.exit(1);
 	}
 }
 
-// Run the bridge
+// =============================================================================
+// Graceful Shutdown
+// =============================================================================
+
+/**
+ * Handles graceful shutdown of all components.
+ */
+function shutdown(): void {
+	console.error("[MCP Bridge] Shutting down...");
+
+	// Disconnect from Stream Deck
+	streamDeckClient.disconnect();
+	streamDeckClient.stopSignalServer();
+
+	// Close HTTP server if running
+	if (httpServerInstance) {
+		httpServerInstance.close();
+	}
+
+	// Close all active transports
+	for (const transport of activeTransports.values()) {
+		try {
+			transport.close();
+		} catch {
+			// Ignore errors during shutdown
+		}
+	}
+
+	process.exit(0);
+}
+
+// =============================================================================
+// Main Entry Point
+// =============================================================================
+
+/**
+ * Main entry point for the MCP Bridge.
+ */
+async function main(): Promise<void> {
+	const config = parseCommandLineArgs();
+
+	console.error("[MCP Bridge] Stream Deck MCP Bridge starting...");
+	console.error(`[MCP Bridge] ${getSocketDescription()}`);
+
+	// Register shutdown handlers
+	process.on("SIGINT", shutdown);
+	process.on("SIGTERM", shutdown);
+
+	// Register callback for when Stream Deck connects/reconnects
+	streamDeckClient.onConnected(async () => {
+		console.error("[MCP Bridge] Stream Deck connection established");
+
+		// Try to connect (signal received means Stream Deck is ready)
+		const connected = await streamDeckClient.connect();
+		if (connected) {
+			await discoverServerAndTools();
+			await notifyToolsChanged();
+		}
+	});
+
+	// Start listening for ready signals
+	streamDeckClient.startSignalServer();
+
+	// Attempt initial quick connection (1-second timeout)
+	console.error("[MCP Bridge] Attempting initial connection to Stream Deck...");
+	const initiallyConnected = await streamDeckClient.connect(1000);
+
+	if (initiallyConnected) {
+		console.error("[MCP Bridge] Initial connection successful");
+		await discoverServerAndTools();
+	} else {
+		console.error(
+			"[MCP Bridge] Stream Deck not available, will connect when ready",
+		);
+	}
+
+	// Start the appropriate transport
+	if (config.transport === "http") {
+		await startHttpTransport(config);
+	} else {
+		await startStdioTransport();
+	}
+}
+
+// Run main
 main().catch((error) => {
-	console.error(`[MCP Bridge] Unhandled error: ${error}`);
+	console.error("[MCP Bridge] Fatal error:", error);
 	process.exit(1);
 });
