@@ -17,9 +17,10 @@
  *   CallToolResponse:   { id, result: object }
  *   ResponseBase:       { id, result?, error? }  (for errors)
  */
+import * as fs from "node:fs";
 import * as net from "node:net";
 
-import { getSocketDescription, getSocketPath } from "./socket-path.js";
+import { getSignalSocketDescription, getSignalSocketPath, getSocketDescription, getSocketPath } from "./socket-path.js";
 
 // Message framing: each JSON message is terminated by a newline (matches C++ side)
 const MESSAGE_DELIMITER = "\n";
@@ -173,20 +174,24 @@ export class StreamDeckClient {
 	private buffer = "";
 	/** Connection status */
 	private connected = false;
-	/** Initial retry delay in milliseconds */
-	private readonly initialRetryDelay = 500; // ms
-	/** Maximum number of connection retries */
-	private readonly maxRetries = 10;
-	/** Maximum retry delay in milliseconds */
-	private readonly maxRetryDelay = 30000; // ms
+	/** Resolver for connection promise when waiting for ready signal */
+	private connectionResolver: ((value: void) => void) | null = null;
+	/** Flag to track if we're intentionally disconnecting */
+	private intentionalDisconnect = false;
 	/** Map of pending requests */
 	private pendingRequests = new Map<number | string, PendingRequest>();
+	/** Callback to invoke when ready signal is received */
+	private readyCallback: (() => void) | null = null;
 	/** Request ID counter */
 	private requestId = 0;
 	/** Request timeout in milliseconds */
 	private readonly requestTimeout = 30000; // ms
+	/** Signal server for receiving ready notifications from Stream Deck */
+	private signalServer: net.Server | null = null;
 	/** Socket connection to Stream Deck */
 	private socket: net.Socket | null = null;
+	/** Socket path for reconnection */
+	private socketPath = "";
 
 	/**
 	 * Call a tool on Stream Deck.
@@ -206,32 +211,28 @@ export class StreamDeckClient {
 	}
 
 	/**
-	 * Connect to Stream Deck's local socket server with retry logic.
+	 * Connect to Stream Deck's local socket server.
+	 * If Stream Deck is not available, starts signal server and waits for ready notification.
+	 * This method will not return until a connection is established.
 	 */
 	public async connect(): Promise<void> {
-		const socketPath = getSocketPath();
-		let retries = 0;
-		let delay = this.initialRetryDelay;
+		this.socketPath = getSocketPath();
+		this.intentionalDisconnect = false;
 
-		while (retries < this.maxRetries) {
-			try {
-				await this.attemptConnection(socketPath);
-				console.error(`[MCP Bridge] Connected to ${getSocketDescription()}`);
-				return;
-			} catch (error) {
-				retries++;
-				if (retries >= this.maxRetries) {
-					throw new Error(`Failed to connect to Stream Deck after ${this.maxRetries} attempts: ${error}`);
-				}
+		// Start the signal server to listen for ready notifications
+		await this.startSignalServer();
 
-				console.error(
-					`[MCP Bridge] Connection attempt ${retries}/${this.maxRetries} failed, ` + `retrying in ${delay}ms...`,
-				);
+		// Try to connect once
+		try {
+			await this.attemptConnection(this.socketPath);
+			console.error(`[MCP Bridge] Connected to ${getSocketDescription()}`);
+		} catch (error) {
+			// Stream Deck not available - wait for ready signal
+			console.error(`[MCP Bridge] Stream Deck not available: ${error}`);
+			console.error(`[MCP Bridge] Waiting for Stream Deck to signal ready on ${getSignalSocketDescription()}...`);
 
-				await this.sleep(delay);
-				// Exponential backoff with jitter
-				delay = Math.min(delay * 2 + Math.random() * 100, this.maxRetryDelay);
-			}
+			// Wait for the ready signal and successful connection
+			await this.waitForReadySignal();
 		}
 	}
 
@@ -239,12 +240,14 @@ export class StreamDeckClient {
 	 * Disconnect from Stream Deck.
 	 */
 	public disconnect(): void {
+		this.intentionalDisconnect = true;
 		if (this.socket) {
 			this.socket.destroy();
 			this.socket = null;
 		}
 		this.connected = false;
 		this.clearPendingRequests(new Error("Disconnected"));
+		this.stopSignalServer();
 	}
 
 	/**
@@ -368,6 +371,13 @@ export class StreamDeckClient {
 		console.error("[MCP Bridge] Connection to Stream Deck closed");
 		this.connected = false;
 		this.clearPendingRequests(new Error("Connection closed"));
+
+		// Wait for ready signal if this wasn't an intentional disconnect
+		// Only set up the callback if we don't already have one waiting
+		if (!this.intentionalDisconnect && !this.readyCallback) {
+			console.error(`[MCP Bridge] Waiting for Stream Deck to signal ready on ${getSignalSocketDescription()}...`);
+			this.waitForReadySignal();
+		}
 	}
 
 	/**
@@ -429,11 +439,89 @@ export class StreamDeckClient {
 	}
 
 	/**
-	 * Sleep for a specified duration.
-	 * @param ms - Milliseconds to sleep
-	 * @returns Promise that resolves after the specified duration
+	 * Start the signal server to listen for ready notifications from Stream Deck.
+	 * The Stream Deck server will connect to this socket when it's ready.
 	 */
-	private sleep(ms: number): Promise<void> {
-		return new Promise((resolve) => setTimeout(resolve, ms));
+	private async startSignalServer(): Promise<void> {
+		if (this.signalServer) {
+			// Signal server already running
+			return;
+		}
+
+		const signalSocketPath = getSignalSocketPath();
+
+		// Clean up existing socket file on Unix systems
+		if (process.platform !== "win32" && fs.existsSync(signalSocketPath)) {
+			fs.unlinkSync(signalSocketPath);
+		}
+
+		return new Promise((resolve, reject) => {
+			this.signalServer = net.createServer((clientSocket) => {
+				console.error("[MCP Bridge] Received ready signal from Stream Deck");
+
+				// Trigger reconnection when signal is received
+				if (this.readyCallback) {
+					this.readyCallback();
+					this.readyCallback = null;
+				}
+
+				// Close the client connection
+				clientSocket.end();
+			});
+
+			this.signalServer.on("error", (error) => {
+				console.error(`[MCP Bridge] Signal server error: ${error.message}`);
+				reject(error);
+			});
+
+			this.signalServer.listen(signalSocketPath, () => {
+				console.error(`[MCP Bridge] Signal server listening on ${getSignalSocketDescription()}`);
+				resolve();
+			});
+		});
+	}
+
+	/**
+	 * Stop the signal server.
+	 */
+	private stopSignalServer(): void {
+		if (this.signalServer) {
+			this.signalServer.close();
+			this.signalServer = null;
+
+			// Clean up socket file on Unix systems
+			const signalSocketPath = getSignalSocketPath();
+			if (process.platform !== "win32" && fs.existsSync(signalSocketPath)) {
+				fs.unlinkSync(signalSocketPath);
+			}
+		}
+	}
+
+	/**
+	 * Wait for the ready signal from Stream Deck and then reconnect.
+	 * Returns a Promise that resolves when the connection is established.
+	 */
+	private waitForReadySignal(): Promise<void> {
+		return new Promise((resolve) => {
+			this.connectionResolver = resolve;
+
+			this.readyCallback = async () => {
+				try {
+					console.error(`[MCP Bridge] Attempting to reconnect to ${getSocketDescription()}...`);
+					await this.attemptConnection(this.socketPath);
+					console.error(`[MCP Bridge] Successfully reconnected to ${getSocketDescription()}`);
+
+					// Resolve the connection promise
+					if (this.connectionResolver) {
+						this.connectionResolver();
+						this.connectionResolver = null;
+					}
+				} catch (error) {
+					console.error(`[MCP Bridge] Reconnection failed: ${error}`);
+					// Keep waiting for another ready signal (callback stays active)
+					// The promise resolver is still valid and will be called on next successful connection
+				}
+			};
+		});
 	}
 }

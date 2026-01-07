@@ -64,3 +64,40 @@ export function getSocketDescription(): string {
 
 	return `Unix Socket: ${socketPath}`;
 }
+
+/**
+ * Get the platform-specific signal socket path for receiving ready notifications.
+ * The Stream Deck server will connect to this socket to signal it's ready.
+ * @returns The signal socket path for the current platform
+ */
+export function getSignalSocketPath(): string {
+	switch (process.platform) {
+		case "darwin": {
+			return path.join("/tmp", "elgato-streamdeck-mcp-bridge-ready.sock");
+		}
+
+		case "win32": {
+			// Windows: Use Named Pipe
+			return "\\\\.\\pipe\\streamdeck-mcp-bridge-ready";
+		}
+
+		default: {
+			console.error(`[MCP Bridge] Fatal error: unsupported platform: ${process.platform}`);
+			process.exit(1);
+		}
+	}
+}
+
+/**
+ * Get a human-readable description of the signal socket path for logging.
+ * @returns A human-readable description of the signal socket path
+ */
+export function getSignalSocketDescription(): string {
+	const socketPath = getSignalSocketPath();
+
+	if (process.platform === "win32") {
+		return `Named Pipe: ${socketPath}`;
+	}
+
+	return `Unix Socket: ${socketPath}`;
+}
