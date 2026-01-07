@@ -8,23 +8,22 @@
  *   macOS:   /tmp/elgato-streamdeck-mcp-bridge.sock
  *   Windows: \\.\pipe\streamdeck-mcp-bridge
  */
-import * as fs from "node:fs";
 import * as path from "node:path";
 
 /**
- * Get the platform-specific socket path for connecting to Stream Deck's MCP local server.
- * This must match exactly with ESDMCPLocalServer::getDefaultSocketPath() in C++.
+ * Get the platform-specific socket path for a given socket name.
+ * @param socketName The base name of the socket without extension (e.g., "elgato-streamdeck-mcp-bridge")
  * @returns The socket path for the current platform
  */
-export function getSocketPath(): string {
+function getPlatformSocketPath(socketName: string): string {
 	switch (process.platform) {
 		case "darwin": {
-			return path.join("/tmp", "elgato-streamdeck-mcp-bridge.sock");
+			return path.join("/tmp", `${socketName}.sock`);
 		}
 
 		case "win32": {
 			// Windows: Use Named Pipe
-			return "\\\\.\\pipe\\streamdeck-mcp-bridge";
+			return `\\\\.\\pipe\\${socketName}`;
 		}
 
 		default: {
@@ -35,20 +34,25 @@ export function getSocketPath(): string {
 }
 
 /**
- * Check if the socket file exists (Unix) or is potentially available (Windows).
- * This is a quick check before attempting connection.
- * @returns True if the socket exists or is potentially available
+ * Get the platform-specific socket path for connecting to Stream Deck's MCP local server.
+ * This must match exactly with ESDMCPLocalServer::getDefaultSocketPath() in C++.
+ * @returns The socket path for the current platform
  */
-export function socketExists(): boolean {
-	const socketPath = getSocketPath();
+export function getSocketPath(): string {
+	return getPlatformSocketPath("elgato-streamdeck-mcp-bridge");
+}
 
+/**
+ * Get a human-readable description of a socket path for logging.
+ * @param socketPath The socket path to describe
+ * @returns A human-readable description of the socket path
+ */
+function getSocketPathDescription(socketPath: string): string {
 	if (process.platform === "win32") {
-		// Named pipes on Windows don't have a simple existence check,
-		// we'll need to try connecting to verify
-		return true;
+		return `Named Pipe: ${socketPath}`;
 	}
 
-	return fs.existsSync(socketPath);
+	return `Unix Socket: ${socketPath}`;
 }
 
 /**
@@ -56,13 +60,7 @@ export function socketExists(): boolean {
  * @returns A human-readable description of the socket path
  */
 export function getSocketDescription(): string {
-	const socketPath = getSocketPath();
-
-	if (process.platform === "win32") {
-		return `Named Pipe: ${socketPath}`;
-	}
-
-	return `Unix Socket: ${socketPath}`;
+	return getSocketPathDescription(getSocketPath());
 }
 
 /**
@@ -71,21 +69,7 @@ export function getSocketDescription(): string {
  * @returns The signal socket path for the current platform
  */
 export function getSignalSocketPath(): string {
-	switch (process.platform) {
-		case "darwin": {
-			return path.join("/tmp", "elgato-streamdeck-mcp-bridge-ready.sock");
-		}
-
-		case "win32": {
-			// Windows: Use Named Pipe
-			return "\\\\.\\pipe\\streamdeck-mcp-bridge-ready";
-		}
-
-		default: {
-			console.error(`[MCP Bridge] Fatal error: unsupported platform: ${process.platform}`);
-			process.exit(1);
-		}
-	}
+	return getPlatformSocketPath("elgato-streamdeck-mcp-bridge-ready");
 }
 
 /**
@@ -93,11 +77,5 @@ export function getSignalSocketPath(): string {
  * @returns A human-readable description of the signal socket path
  */
 export function getSignalSocketDescription(): string {
-	const socketPath = getSignalSocketPath();
-
-	if (process.platform === "win32") {
-		return `Named Pipe: ${socketPath}`;
-	}
-
-	return `Unix Socket: ${socketPath}`;
+	return getSocketPathDescription(getSignalSocketPath());
 }
