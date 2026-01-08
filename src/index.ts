@@ -180,6 +180,9 @@ let mcpServer: McpServer | null = null;
 // For HTTP transport: map of session ID to MCP server instance
 const httpMcpServers: Map<string, McpServer> = new Map();
 
+// HTTP server instance for graceful shutdown
+let httpServerInstance: ReturnType<ReturnType<typeof express>["listen"]> | null = null;
+
 // ============================================================================
 // Tool Discovery
 // ============================================================================
@@ -220,7 +223,6 @@ async function discoverServerAndTools(): Promise<void> {
  */
 async function onStreamDeckConnected(): Promise<void> {
 	try {
-
 		// Discover server info and tools
 		await discoverServerAndTools();
 
@@ -502,13 +504,13 @@ async function startHttpTransport(port: number): Promise<void> {
 
 	// Start HTTP server
 	return new Promise((resolve, reject) => {
-		const server = app.listen(port, () => {
+		httpServerInstance = app.listen(port, () => {
 			console.error(`[MCP Bridge] HTTP server listening on http://localhost:${port}/mcp`);
 			console.error(`[MCP Bridge] Health check available at http://localhost:${port}/health`);
 			resolve();
 		});
 
-		server.on("error", (error: NodeJS.ErrnoException) => {
+		httpServerInstance.on("error", (error: NodeJS.ErrnoException) => {
 			if (error.code === "EADDRINUSE") {
 				console.error(`[MCP Bridge] Port ${port} is already in use`);
 				reject(new Error(`Port ${port} is already in use. Try a different port with --port <number>`));
@@ -584,6 +586,11 @@ async function main(): Promise<void> {
 		const shutdown = async () => {
 			console.error("[MCP Bridge] Shutting down...");
 			streamDeckClient.disconnect();
+			if (httpServerInstance) {
+				httpServerInstance.close(() => {
+					console.error("[MCP Bridge] HTTP server closed");
+				});
+			}
 			process.exit(0);
 		};
 
