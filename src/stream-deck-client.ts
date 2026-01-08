@@ -415,7 +415,7 @@ export class StreamDeckClient {
 		// Only set up the callback if we don't already have one waiting
 		if (!this.intentionalDisconnect && !this.readyCallback) {
 			console.error(`[MCP Bridge] Waiting for Stream Deck to signal ready on ${getSignalSocketDescription()}...`);
-			this.waitForReadySignal();
+			void this.waitForReadySignal();
 		}
 	}
 
