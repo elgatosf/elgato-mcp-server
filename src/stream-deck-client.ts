@@ -158,11 +158,38 @@ interface CallToolResponse extends ResponseBase {
 /** Pending request structure */
 interface PendingRequest {
 	/** Resolve function */
-	resolve: (result: unknown) => void;
+	resolve: (result: ResponseBase) => void;
 	/** Reject function */
 	reject: (error: Error) => void;
 	/** Timeout handle */
 	timeout: NodeJS.Timeout;
+}
+
+/**
+ * Type guard to check if a response is a CallToolResponse.
+ * @param response - Response to check
+ * @returns True if response is a CallToolResponse
+ */
+function isCallToolResponse(response: ResponseBase): response is CallToolResponse {
+	return "result" in response;
+}
+
+/**
+ * Type guard to check if a response is a ServerInfoResponse.
+ * @param response - Response to check
+ * @returns True if response is a ServerInfoResponse
+ */
+function isServerInfoResponse(response: ResponseBase): response is ServerInfoResponse {
+	return "name" in response && "version" in response;
+}
+
+/**
+ * Type guard to check if a response is a ToolsListResponse.
+ * @param response - Response to check
+ * @returns True if response is a ToolsListResponse
+ */
+function isToolsListResponse(response: ResponseBase): response is ToolsListResponse {
+	return "result" in response && typeof response.result === "object" && response.result !== null && "tools" in response.result;
 }
 
 /**
@@ -210,7 +237,10 @@ export class StreamDeckClient {
 			toolName,
 			arguments: args,
 		};
-		const response = (await this.sendRequest(request)) as CallToolResponse;
+		const response = await this.sendRequest(request);
+		if (!isCallToolResponse(response)) {
+			throw new Error("Invalid response type for call_tool");
+		}
 		return response.result;
 	}
 
@@ -291,7 +321,11 @@ export class StreamDeckClient {
 			id: String(++this.requestId),
 			method: "server_info",
 		};
-		return this.sendRequest(request) as Promise<ServerInfoResponse>;
+		const response = await this.sendRequest(request);
+		if (!isServerInfoResponse(response)) {
+			throw new Error("Invalid response type for server_info");
+		}
+		return response;
 	}
 
 	/**
@@ -303,7 +337,11 @@ export class StreamDeckClient {
 			id: String(++this.requestId),
 			method: "tools_list",
 		};
-		return this.sendRequest(request) as Promise<ToolsListResponse>;
+		const response = await this.sendRequest(request);
+		if (!isToolsListResponse(response)) {
+			throw new Error("Invalid response type for tools_list");
+		}
+		return response;
 	}
 
 	/**
@@ -480,7 +518,7 @@ export class StreamDeckClient {
 	 * @param request - Request to send
 	 * @returns Promise resolving to the response
 	 */
-	private sendRequest(request: RequestBase): Promise<unknown> {
+	private sendRequest(request: RequestBase): Promise<ResponseBase> {
 		if (!this.connected || !this.socket) {
 			throw new Error("Not connected to Stream Deck");
 		}
