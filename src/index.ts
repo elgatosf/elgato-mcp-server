@@ -333,6 +333,14 @@ function createServer(serverInfo: ServerInfoResponse): McpServer {
 	server.server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToolResult> => {
 		const { name, arguments: args } = request.params;
 
+		// Validate arguments
+		if (args !== undefined && (typeof args !== "object" || args === null || Array.isArray(args))) {
+			return {
+				content: [{ type: "text", text: "Invalid arguments: must be an object" }],
+				isError: true,
+			};
+		}
+
 		// Check if StreamDeck is connected
 		if (!streamDeckClient.isConnected()) {
 			return {
