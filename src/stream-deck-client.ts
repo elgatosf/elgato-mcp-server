@@ -253,12 +253,19 @@ export class StreamDeckClient {
 		await this.startSignalServer();
 
 		// Try to connect with timeout
+		let timeoutHandle: NodeJS.Timeout | null = null;
 		const timeoutPromise = new Promise<never>((_, reject) => {
-			setTimeout(() => reject(new Error("Connection timeout")), timeoutMs);
+			timeoutHandle = setTimeout(() => reject(new Error("Connection timeout")), timeoutMs);
 		});
 
-		await Promise.race([this.attemptConnection(this.socketPath), timeoutPromise]);
-		console.error(`[MCP Bridge] Connected to ${getSocketDescription()}`);
+		try {
+			await Promise.race([this.attemptConnection(this.socketPath), timeoutPromise]);
+			console.error(`[MCP Bridge] Connected to ${getSocketDescription()}`);
+		} finally {
+			if (timeoutHandle) {
+				clearTimeout(timeoutHandle);
+			}
+		}
 	}
 
 	/**
