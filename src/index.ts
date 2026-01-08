@@ -397,7 +397,7 @@ async function startHttpTransport(port: number): Promise<void> {
 	app.use(express.json());
 
 	// Store active transports by session ID
-	const transports: Record<string, StreamableHTTPServerTransport> = {};
+	const transports = new Map<string, StreamableHTTPServerTransport>();
 
 	// POST /mcp - Handle MCP requests
 	app.post("/mcp", async (req, res) => {
@@ -405,9 +405,9 @@ async function startHttpTransport(port: number): Promise<void> {
 			const sessionId = req.headers["mcp-session-id"] as string | undefined;
 			let transport: StreamableHTTPServerTransport;
 
-			if (sessionId && transports[sessionId]) {
+			if (sessionId && transports.has(sessionId)) {
 				// Reuse existing session
-				transport = transports[sessionId];
+				transport = transports.get(sessionId)!;
 			} else if (!sessionId && isInitializeRequest(req.body)) {
 				// New session initialization
 				// Use cached server info if available, otherwise use default
@@ -419,12 +419,12 @@ async function startHttpTransport(port: number): Promise<void> {
 				transport = new StreamableHTTPServerTransport({
 					sessionIdGenerator: () => randomUUID(),
 					onsessioninitialized: (id) => {
-						transports[id] = transport;
+						transports.set(id, transport);
 						httpMcpServers.set(id, server);
 						console.error(`[MCP Bridge] HTTP session initialized: ${id}`);
 					},
 					onsessionclosed: (id) => {
-						delete transports[id];
+						transports.delete(id);
 						httpMcpServers.delete(id);
 						console.error(`[MCP Bridge] HTTP session closed: ${id}`);
 					},
@@ -432,7 +432,7 @@ async function startHttpTransport(port: number): Promise<void> {
 
 				transport.onclose = () => {
 					if (transport.sessionId) {
-						delete transports[transport.sessionId];
+						transports.delete(transport.sessionId);
 						httpMcpServers.delete(transport.sessionId);
 					}
 				};
@@ -462,7 +462,7 @@ async function startHttpTransport(port: number): Promise<void> {
 	app.get("/mcp", async (req, res) => {
 		try {
 			const sessionId = req.headers["mcp-session-id"] as string;
-			const transport = transports[sessionId];
+			const transport = transports.get(sessionId);
 
 			if (transport) {
 				await transport.handleRequest(req, res);
@@ -479,7 +479,7 @@ async function startHttpTransport(port: number): Promise<void> {
 	app.delete("/mcp", async (req, res) => {
 		try {
 			const sessionId = req.headers["mcp-session-id"] as string;
-			const transport = transports[sessionId];
+			const transport = transports.get(sessionId);
 
 			if (transport) {
 				await transport.handleRequest(req, res);
@@ -498,7 +498,7 @@ async function startHttpTransport(port: number): Promise<void> {
 			status: "ok",
 			transport: "http",
 			streamDeckConnected: streamDeckClient.isConnected(),
-			activeSessions: Object.keys(transports).length,
+			activeSessions: transports.size,
 		});
 	});
 
