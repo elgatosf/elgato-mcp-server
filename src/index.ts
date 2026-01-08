@@ -213,11 +213,7 @@ async function onStreamDeckConnected(): Promise<void> {
 		// Notify MCP clients that tools have changed
 		if (mcpServer) {
 			console.error("[MCP Bridge] Notifying clients that tools list has changed");
-			// Use the low-level server API to send notification
-			await mcpServer.server.notification({
-				method: "notifications/tools/list_changed",
-				params: {},
-			});
+			await mcpServer.sendToolListChanged();
 		}
 	} catch (error) {
 		console.error(`[MCP Bridge] Error discovering tools: ${error}`);
