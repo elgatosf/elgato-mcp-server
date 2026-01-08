@@ -240,7 +240,7 @@ async function onStreamDeckConnected(): Promise<void> {
 			await Promise.all(notifications);
 		}
 	} catch (error) {
-		console.error(`[MCP Bridge] Error discovering tools: ${error}`);
+		console.error(`[MCP Bridge] Error discovering tools: ${error instanceof Error ? error.message : String(error)}`);
 	}
 }
 
@@ -258,7 +258,7 @@ async function connectToStreamDeckInBackground(): Promise<void> {
 		// Start connection attempt (this will wait for StreamDeck if not available)
 		await streamDeckClient.connect();
 	} catch (error) {
-		console.error(`[MCP Bridge] Background connection error: ${error}`);
+		console.error(`[MCP Bridge] Background connection error: ${error instanceof Error ? error.message : String(error)}`);
 		// Don't crash - just log the error and continue without StreamDeck
 	}
 }
@@ -449,10 +449,11 @@ async function startHttpTransport(port: number): Promise<void> {
 
 			await transport.handleRequest(req, res, req.body);
 		} catch (error) {
-			console.error(`[MCP Bridge] Error handling POST request: ${error}`);
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			console.error(`[MCP Bridge] Error handling POST request: ${errorMessage}`);
 			res.status(500).json({
 				jsonrpc: "2.0",
-				error: { code: -32000, message: `Internal error: ${error}` },
+				error: { code: -32000, message: `Internal error: ${errorMessage}` },
 				id: null,
 			});
 		}
@@ -470,8 +471,9 @@ async function startHttpTransport(port: number): Promise<void> {
 				res.status(400).send("Invalid session");
 			}
 		} catch (error) {
-			console.error(`[MCP Bridge] Error handling GET request: ${error}`);
-			res.status(500).send(`Internal error: ${error}`);
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			console.error(`[MCP Bridge] Error handling GET request: ${errorMessage}`);
+			res.status(500).send(`Internal error: ${errorMessage}`);
 		}
 	});
 
@@ -487,8 +489,9 @@ async function startHttpTransport(port: number): Promise<void> {
 				res.status(400).send("Invalid session");
 			}
 		} catch (error) {
-			console.error(`[MCP Bridge] Error handling DELETE request: ${error}`);
-			res.status(500).send(`Internal error: ${error}`);
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			console.error(`[MCP Bridge] Error handling DELETE request: ${errorMessage}`);
+			res.status(500).send(`Internal error: ${errorMessage}`);
 		}
 	});
 
@@ -554,7 +557,7 @@ async function main(): Promise<void> {
 				console.error("[MCP Bridge] Using actual Stream Deck server info");
 			}
 		} catch (error) {
-			console.error(`[MCP Bridge] Quick connection failed: ${error}`);
+			console.error(`[MCP Bridge] Quick connection failed: ${error instanceof Error ? error.message : String(error)}`);
 			console.error("[MCP Bridge] Will use default server info and connect in background");
 		}
 
@@ -571,14 +574,18 @@ async function main(): Promise<void> {
 			ngrok
 				.connect({ addr: config.port, authtoken_from_env: true })
 				.then((listener) => console.error(`Ingress established at: ${listener.url()}`))
-				.catch((error) => console.error(`Failed to establish ingress: ${error}`));
+				.catch((error) =>
+					console.error(`Failed to establish ingress: ${error instanceof Error ? error.message : String(error)}`),
+				);
 		}
 
 		// If we didn't connect successfully, connect in the background
 		if (!streamDeckClient.isConnected()) {
 			console.error(`[MCP Bridge] Will connect to ${getSocketDescription()} in background...`);
 			connectToStreamDeckInBackground().catch((error) => {
-				console.error(`[MCP Bridge] Background connection failed: ${error}`);
+				console.error(
+					`[MCP Bridge] Background connection failed: ${error instanceof Error ? error.message : String(error)}`,
+				);
 			});
 		}
 
@@ -597,13 +604,13 @@ async function main(): Promise<void> {
 		process.on("SIGINT", shutdown);
 		process.on("SIGTERM", shutdown);
 	} catch (error) {
-		console.error(`[MCP Bridge] Fatal error: ${error}`);
+		console.error(`[MCP Bridge] Fatal error: ${error instanceof Error ? error.message : String(error)}`);
 		process.exit(1);
 	}
 }
 
 // Run the bridge
 main().catch((error) => {
-	console.error(`[MCP Bridge] Unhandled error: ${error}`);
+	console.error(`[MCP Bridge] Unhandled error: ${error instanceof Error ? error.message : String(error)}`);
 	process.exit(1);
 });
