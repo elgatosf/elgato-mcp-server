@@ -124,6 +124,11 @@ Options:
   --ngrok             Enable ngrok tunnel for HTTP transport (requires NGROK_AUTHTOKEN env var)
   --help, -h          Show this help message
 
+Platform Support:
+  macOS               Unix domain sockets
+  Windows             Named pipes
+  Linux               Not currently supported
+
 Examples:
   streamdeck-mcp-bridge                    # Use stdio transport (default)
   streamdeck-mcp-bridge --http             # Use HTTP transport on port 9090
