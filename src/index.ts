@@ -174,7 +174,11 @@ let cachedServerInfo: ServerInfoResponse | null = null;
 let cachedTools: McpTool[] = [];
 
 // MCP server instance (for sending notifications when tools change)
+// For stdio transport: single server instance
 let mcpServer: McpServer | null = null;
+
+// For HTTP transport: map of session ID to MCP server instance
+const httpMcpServers: Map<string, McpServer> = new Map();
 
 // ============================================================================
 // Tool Discovery
@@ -216,13 +220,22 @@ async function discoverServerAndTools(): Promise<void> {
  */
 async function onStreamDeckConnected(): Promise<void> {
 	try {
+
 		// Discover server info and tools
 		await discoverServerAndTools();
 
 		// Notify MCP clients that tools have changed
+		// For stdio transport
 		if (mcpServer) {
-			console.error("[MCP Bridge] Notifying clients that tools list has changed");
+			console.error("[MCP Bridge] Notifying stdio client that tools list has changed");
 			await mcpServer.sendToolListChanged();
+		}
+
+		// For HTTP transport - notify all active sessions
+		if (httpMcpServers.size > 0) {
+			console.error(`[MCP Bridge] Notifying ${httpMcpServers.size} HTTP session(s) that tools list has changed`);
+			const notifications = Array.from(httpMcpServers.values()).map((server) => server.sendToolListChanged());
+			await Promise.all(notifications);
 		}
 	} catch (error) {
 		console.error(`[MCP Bridge] Error discovering tools: ${error}`);
@@ -398,14 +411,19 @@ async function startHttpTransport(port: number): Promise<void> {
 				// Use cached server info if available, otherwise use default
 				const serverInfo = cachedServerInfo ?? DEFAULT_SERVER_INFO;
 
+				// Create a new MCP server for this session
+				const server = createServer(serverInfo);
+
 				transport = new StreamableHTTPServerTransport({
 					sessionIdGenerator: () => randomUUID(),
 					onsessioninitialized: (id) => {
 						transports[id] = transport;
+						httpMcpServers.set(id, server);
 						console.error(`[MCP Bridge] HTTP session initialized: ${id}`);
 					},
 					onsessionclosed: (id) => {
 						delete transports[id];
+						httpMcpServers.delete(id);
 						console.error(`[MCP Bridge] HTTP session closed: ${id}`);
 					},
 				});
@@ -413,11 +431,10 @@ async function startHttpTransport(port: number): Promise<void> {
 				transport.onclose = () => {
 					if (transport.sessionId) {
 						delete transports[transport.sessionId];
+						httpMcpServers.delete(transport.sessionId);
 					}
 				};
 
-				// Create a new MCP server for this session
-				const server = createServer(serverInfo);
 				await server.connect(transport);
 			} else {
 				res.status(400).json({
