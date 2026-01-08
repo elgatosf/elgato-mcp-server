@@ -316,9 +316,13 @@ export class StreamDeckClient {
 
 	/**
 	 * Set a callback to be invoked when connection is established or re-established.
+	 * Note: Only one callback is supported. Calling this multiple times will overwrite the previous callback.
 	 * @param callback - Function to call when connected
 	 */
 	public onConnected(callback: () => Promise<void> | void): void {
+		if (this.onConnectedCallback) {
+			console.warn("[MCP Bridge] onConnected callback already set, overwriting");
+		}
 		this.onConnectedCallback = callback;
 	}
 
