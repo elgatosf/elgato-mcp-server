@@ -178,6 +178,8 @@ export class StreamDeckClient {
 	private connectionResolver: ((value: void) => void) | null = null;
 	/** Flag to track if we're intentionally disconnecting */
 	private intentionalDisconnect = false;
+	/** Maximum buffer size to prevent memory exhaustion */
+	private readonly MAX_BUFFER_SIZE = 1024 * 1024; // 1MB
 	/** Callback to invoke when connection is established or re-established */
 	private onConnectedCallback: (() => Promise<void> | void) | null = null;
 	/** Map of pending requests */
@@ -431,6 +433,11 @@ export class StreamDeckClient {
 	 */
 	private onData(data: Buffer | string): void {
 		this.buffer += data.toString();
+		if (this.buffer.length > this.MAX_BUFFER_SIZE) {
+			console.error("[MCP Bridge] Buffer overflow, disconnecting");
+			this.disconnect();
+			return;
+		}
 		this.processBuffer();
 	}
 
