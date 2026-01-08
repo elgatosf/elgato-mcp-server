@@ -178,6 +178,8 @@ export class StreamDeckClient {
 	private connectionResolver: ((value: void) => void) | null = null;
 	/** Flag to track if we're intentionally disconnecting */
 	private intentionalDisconnect = false;
+	/** Callback to invoke when connection is established or re-established */
+	private onConnectedCallback: (() => Promise<void> | void) | null = null;
 	/** Map of pending requests */
 	private pendingRequests = new Map<number | string, PendingRequest>();
 	/** Callback to invoke when ready signal is received */
@@ -237,6 +239,27 @@ export class StreamDeckClient {
 	}
 
 	/**
+	 * Try to connect to Stream Deck with a timeout.
+	 * If connection fails or times out, throws an error.
+	 * @param timeoutMs - Timeout in milliseconds
+	 */
+	public async connectWithTimeout(timeoutMs: number): Promise<void> {
+		this.socketPath = getSocketPath();
+		this.intentionalDisconnect = false;
+
+		// Start the signal server to listen for ready notifications
+		await this.startSignalServer();
+
+		// Try to connect with timeout
+		const timeoutPromise = new Promise<never>((_, reject) => {
+			setTimeout(() => reject(new Error("Connection timeout")), timeoutMs);
+		});
+
+		await Promise.race([this.attemptConnection(this.socketPath), timeoutPromise]);
+		console.error(`[MCP Bridge] Connected to ${getSocketDescription()}`);
+	}
+
+	/**
 	 * Disconnect from Stream Deck.
 	 */
 	public disconnect(): void {
@@ -283,6 +306,14 @@ export class StreamDeckClient {
 	}
 
 	/**
+	 * Set a callback to be invoked when connection is established or re-established.
+	 * @param callback - Function to call when connected
+	 */
+	public onConnected(callback: () => Promise<void> | void): void {
+		this.onConnectedCallback = callback;
+	}
+
+	/**
 	 * Attempt a single connection to the socket.
 	 * @param socketPath - Path to the socket
 	 * @returns Promise that resolves when connected
@@ -295,6 +326,14 @@ export class StreamDeckClient {
 			const onConnect = (): void => {
 				this.connected = true;
 				this.socket?.removeListener("error", onError);
+
+				// Invoke the connected callback if set
+				if (this.onConnectedCallback) {
+					Promise.resolve(this.onConnectedCallback()).catch((error) => {
+						console.error(`[MCP Bridge] Error in onConnected callback: ${error}`);
+					});
+				}
+
 				resolve();
 			};
 

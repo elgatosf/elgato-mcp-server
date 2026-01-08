@@ -164,6 +164,9 @@ const streamDeckClient = new StreamDeckClient();
 let cachedServerInfo: ServerInfoResponse | null = null;
 let cachedTools: McpTool[] = [];
 
+// MCP server instance (for sending notifications when tools change)
+let mcpServer: McpServer | null = null;
+
 // ============================================================================
 // Tool Discovery
 // ============================================================================
@@ -195,6 +198,48 @@ async function discoverServerAndTools(): Promise<void> {
 
 	for (const tool of cachedTools) {
 		console.error(`[MCP Bridge]   - ${tool.name}: ${tool.description ?? "(no description)"}`);
+	}
+}
+
+/**
+ * Handle StreamDeck connection - discover tools and notify clients.
+ * This is called both on initial connection and on reconnection.
+ */
+async function onStreamDeckConnected(): Promise<void> {
+	try {
+		// Discover server info and tools
+		await discoverServerAndTools();
+
+		// Notify MCP clients that tools have changed
+		if (mcpServer) {
+			console.error("[MCP Bridge] Notifying clients that tools list has changed");
+			// Use the low-level server API to send notification
+			await mcpServer.server.notification({
+				method: "notifications/tools/list_changed",
+				params: {},
+			});
+		}
+	} catch (error) {
+		console.error(`[MCP Bridge] Error discovering tools: ${error}`);
+	}
+}
+
+/**
+ * Connect to StreamDeck in the background and discover tools when connected.
+ * This function does not block - it returns immediately and handles connection asynchronously.
+ */
+async function connectToStreamDeckInBackground(): Promise<void> {
+	try {
+		console.error("[MCP Bridge] Attempting to connect to Stream Deck in background...");
+
+		// Set up callback for when connection is established (or re-established)
+		streamDeckClient.onConnected(onStreamDeckConnected);
+
+		// Start connection attempt (this will wait for StreamDeck if not available)
+		await streamDeckClient.connect();
+	} catch (error) {
+		console.error(`[MCP Bridge] Background connection error: ${error}`);
+		// Don't crash - just log the error and continue without StreamDeck
 	}
 }
 
@@ -268,6 +313,19 @@ function createServer(serverInfo: ServerInfoResponse): McpServer {
 	server.server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToolResult> => {
 		const { name, arguments: args } = request.params;
 
+		// Check if StreamDeck is connected
+		if (!streamDeckClient.isConnected()) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `Stream Deck is not connected. Please start Stream Deck and try again.`,
+					},
+				],
+				isError: true,
+			};
+		}
+
 		// Find the tool in our cache to validate it exists
 		const tool = cachedTools.find((t) => t.name === name);
 		if (!tool) {
@@ -332,14 +390,13 @@ async function startHttpTransport(port: number): Promise<void> {
 				transport = transports[sessionId];
 			} else if (!sessionId && isInitializeRequest(req.body)) {
 				// New session initialization
-				if (!cachedServerInfo) {
-					res.status(500).json({
-						jsonrpc: "2.0",
-						error: { code: -32000, message: "Server info not available" },
-						id: null,
-					});
-					return;
-				}
+				// Use cached server info if available, otherwise use default
+				const serverInfo = cachedServerInfo ?? {
+					id: "0",
+					name: "streamdeck-mcp-bridge",
+					version: "1.0.0",
+					title: "Stream Deck MCP Bridge",
+				};
 
 				transport = new StreamableHTTPServerTransport({
 					sessionIdGenerator: () => randomUUID(),
@@ -360,7 +417,7 @@ async function startHttpTransport(port: number): Promise<void> {
 				};
 
 				// Create a new MCP server for this session
-				const server = createServer(cachedServerInfo);
+				const server = createServer(serverInfo);
 				await server.connect(transport);
 			} else {
 				res.status(400).json({
@@ -452,31 +509,49 @@ async function startHttpTransport(port: number): Promise<void> {
 
 /**
  * Main entry point for the MCP bridge.
- * Connects to Stream Deck, discovers tools, and starts the appropriate transport.
+ * Tries to connect to Stream Deck first to get actual server info.
+ * If not available, starts with default info and connects in background.
  */
 async function main(): Promise<void> {
 	const config = parseArgs();
 
 	console.error("[MCP Bridge] Starting Stream Deck MCP Bridge...");
 	console.error(`[MCP Bridge] Transport mode: ${config.transport}`);
-	console.error(`[MCP Bridge] Connecting to ${getSocketDescription()}`);
 
 	try {
-		// Connect to Stream Deck's local socket server
-		await streamDeckClient.connect();
+		// Default server info to use if StreamDeck is not available
+		const defaultServerInfo: ServerInfoResponse = {
+			id: "0",
+			name: "streamdeck-mcp-bridge",
+			version: "1.0.0",
+			title: "Stream Deck MCP Bridge",
+		};
 
-		// Discover server info and available tools from Stream Deck
-		await discoverServerAndTools();
+		// Try to connect to StreamDeck immediately to get actual server info
+		let serverInfo = defaultServerInfo;
+		console.error(`[MCP Bridge] Attempting quick connection to ${getSocketDescription()}...`);
 
-		if (!cachedServerInfo) {
-			throw new Error("Failed to get server info");
+		try {
+			// Try a quick connection with short timeout
+			await streamDeckClient.connectWithTimeout(2000);
+
+			// If successful, discover server info and tools
+			await discoverServerAndTools();
+
+			if (cachedServerInfo) {
+				serverInfo = cachedServerInfo;
+				console.error("[MCP Bridge] Using actual Stream Deck server info");
+			}
+		} catch (error) {
+			console.error(`[MCP Bridge] Quick connection failed: ${error}`);
+			console.error("[MCP Bridge] Will use default server info and connect in background");
 		}
 
 		// Initialize transport based on configuration
 		if (config.transport === "stdio") {
-			// Create MCP server with discovered server info
-			const server = createServer(cachedServerInfo);
-			await startStdioTransport(server);
+			// Create MCP server with discovered or default server info
+			mcpServer = createServer(serverInfo);
+			await startStdioTransport(mcpServer);
 		} else {
 			// HTTP transport - servers are created per-session
 			await startHttpTransport(config.port);
@@ -486,6 +561,14 @@ async function main(): Promise<void> {
 				.connect({ addr: config.port, authtoken_from_env: true })
 				.then((listener) => console.error(`Ingress established at: ${listener.url()}`))
 				.catch((error) => console.error(`Failed to establish ingress: ${error}`));
+		}
+
+		// If we didn't connect successfully, connect in the background
+		if (!streamDeckClient.isConnected()) {
+			console.error(`[MCP Bridge] Will connect to ${getSocketDescription()} in background...`);
+			connectToStreamDeckInBackground().catch((error) => {
+				console.error(`[MCP Bridge] Background connection failed: ${error}`);
+			});
 		}
 
 		// Handle graceful shutdown
