@@ -59,6 +59,8 @@ interface Config {
 	transport: "http" | "stdio";
 	/** Port number for HTTP transport */
 	port: number;
+	/** Enable ngrok for HTTP transport */
+	enableNgrok: boolean;
 }
 
 /**
@@ -85,6 +87,9 @@ function parseArgs(): Config {
 		},
 		port: {
 			type: "string" as const,
+		},
+		ngrok: {
+			type: "boolean" as const,
 		},
 		help: {
 			type: "boolean" as const,
@@ -116,11 +121,13 @@ Options:
   --transport <mode>  Transport mode: 'stdio' (default) or 'http'
   --http              Shorthand for --transport http
   --port <number>     HTTP server port (default: 9090), enables HTTP transport mode if other not provided
+  --ngrok             Enable ngrok tunnel for HTTP transport (requires NGROK_AUTHTOKEN env var)
   --help, -h          Show this help message
 
 Examples:
   streamdeck-mcp-bridge                    # Use stdio transport (default)
   streamdeck-mcp-bridge --http             # Use HTTP transport on port 9090
+  streamdeck-mcp-bridge --http --ngrok     # Use HTTP transport with ngrok tunnel
   streamdeck-mcp-bridge --transport http --port 3000
       `);
 		process.exit(0);
@@ -130,6 +137,7 @@ Examples:
 	const config: Config = {
 		transport: "stdio",
 		port: 9090,
+		enableNgrok: false,
 	};
 
 	// Handle --http flag (shorthand for --transport http)
@@ -146,6 +154,11 @@ Examples:
 		}
 		config.port = port;
 		config.transport = "http";
+	}
+
+	// Handle --ngrok option
+	if (parsed.values.ngrok) {
+		config.enableNgrok = true;
 	}
 
 	// Handle --transport option (overrides --http if both are provided)
@@ -578,13 +591,17 @@ async function main(): Promise<void> {
 			// HTTP transport - servers are created per-session
 			await startHttpTransport(config.port);
 
-			// Get your endpoint online
-			ngrok
-				.connect({ addr: config.port, authtoken_from_env: true })
-				.then((listener) => console.error(`Ingress established at: ${listener.url()}`))
-				.catch((error) =>
-					console.error(`Failed to establish ingress: ${error instanceof Error ? error.message : String(error)}`),
-				);
+			// Get your endpoint online with ngrok if enabled
+			if (config.enableNgrok) {
+				ngrok
+					.connect({ addr: config.port, authtoken_from_env: true })
+					.then((listener) => console.error(`[MCP Bridge] Ngrok tunnel established at: ${listener.url()}`))
+					.catch((error) =>
+						console.error(
+							`[MCP Bridge] Failed to establish ngrok tunnel: ${error instanceof Error ? error.message : String(error)}`,
+						),
+					);
+			}
 		}
 
 		// If we didn't connect successfully, connect in the background
