@@ -66,7 +66,7 @@ interface Config {
  */
 const DEFAULT_SERVER_INFO: ServerInfoResponse = {
 	id: "0",
-	name: "Stream Deck MCP Server",
+	name: "streamdeck-mcp-bridge",
 	version: "1.0.0",
 };
 
