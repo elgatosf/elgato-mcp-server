@@ -62,6 +62,15 @@ interface Config {
 }
 
 /**
+ * Default server info to use when StreamDeck is not available or not yet connected.
+ */
+const DEFAULT_SERVER_INFO: ServerInfoResponse = {
+	id: "0",
+	name: "Stream Deck MCP Server",
+	version: "1.0.0",
+};
+
+/**
  * Parse command-line arguments to determine transport mode and configuration.
  * Uses Node.js built-in util.parseArgs() for robust argument parsing.
  * @returns Parsed configuration object
@@ -387,12 +396,7 @@ async function startHttpTransport(port: number): Promise<void> {
 			} else if (!sessionId && isInitializeRequest(req.body)) {
 				// New session initialization
 				// Use cached server info if available, otherwise use default
-				const serverInfo = cachedServerInfo ?? {
-					id: "0",
-					name: "streamdeck-mcp-bridge",
-					version: "1.0.0",
-					title: "Stream Deck MCP Bridge",
-				};
+				const serverInfo = cachedServerInfo ?? DEFAULT_SERVER_INFO;
 
 				transport = new StreamableHTTPServerTransport({
 					sessionIdGenerator: () => randomUUID(),
@@ -515,16 +519,8 @@ async function main(): Promise<void> {
 	console.error(`[MCP Bridge] Transport mode: ${config.transport}`);
 
 	try {
-		// Default server info to use if StreamDeck is not available
-		const defaultServerInfo: ServerInfoResponse = {
-			id: "0",
-			name: "streamdeck-mcp-bridge",
-			version: "1.0.0",
-			title: "Stream Deck MCP Bridge",
-		};
-
 		// Try to connect to StreamDeck immediately to get actual server info
-		let serverInfo = defaultServerInfo;
+		let serverInfo = DEFAULT_SERVER_INFO;
 		console.error(`[MCP Bridge] Attempting quick connection to ${getSocketDescription()}...`);
 
 		try {
