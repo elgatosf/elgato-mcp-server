@@ -584,15 +584,19 @@ export class StreamDeckClient {
 					await this.attemptConnection(this.socketPath);
 					console.error(`[MCP Bridge] Successfully reconnected to ${getSocketDescription()}`);
 
-					// Resolve the connection promise
+					// Resolve the connection promise and clear callbacks
 					if (this.connectionResolver) {
 						this.connectionResolver();
-						this.connectionResolver = null;
 					}
 				} catch (error) {
 					console.error(`[MCP Bridge] Reconnection failed: ${error}`);
 					// Keep waiting for another ready signal (callback stays active)
 					// The promise resolver is still valid and will be called on next successful connection
+					return;
+				} finally {
+					// Clear callbacks after successful connection
+					this.connectionResolver = null;
+					this.readyCallback = null;
 				}
 			};
 		});
