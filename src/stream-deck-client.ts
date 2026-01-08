@@ -514,12 +514,22 @@ export class StreamDeckClient {
 				clientSocket.end();
 			});
 
-			this.signalServer.on("error", (error) => {
+			let errorHandler: ((error: NodeJS.ErrnoException) => void) | null = null;
+
+			this.signalServer.on("error", (error: NodeJS.ErrnoException) => {
 				console.error(`[MCP Bridge] Signal server error: ${error.message}`);
-				reject(error);
+				if (error.code === "EADDRINUSE") {
+					console.error("[MCP Bridge] Signal socket address already in use");
+				}
+				if (errorHandler) {
+					errorHandler(error);
+					errorHandler = null;
+				}
 			});
 
+			errorHandler = reject;
 			this.signalServer.listen(signalSocketPath, () => {
+				errorHandler = null;
 				console.error(`[MCP Bridge] Signal server listening on ${getSignalSocketDescription()}`);
 				resolve();
 			});
