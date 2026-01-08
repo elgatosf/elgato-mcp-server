@@ -320,6 +320,12 @@ export class StreamDeckClient {
 	 */
 	private attemptConnection(socketPath: string): Promise<void> {
 		return new Promise((resolve, reject) => {
+			// Clean up existing socket if any
+			if (this.socket) {
+				this.socket.removeAllListeners();
+				this.socket.destroy();
+			}
+
 			this.socket = net.createConnection(socketPath);
 
 			/** Handle successful connection */
