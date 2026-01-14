@@ -1,8 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import cors from "cors";
-import express, { type Request, type Response } from "express";
+import express, { type Express, type Request, type Response } from "express";
 import type { Server as HttpServer } from "node:http";
 
 import { HTTP_DEFAULT_PORT } from "../constants.js";
@@ -15,41 +16,28 @@ const DEFAULT_SESSION_TIMEOUT_MS = 60 * 60 * 1000;
 /** Cleanup interval: check for idle sessions every 5 minutes */
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 
-interface HttpTransportOptions {
+/** Options for configuring the HTTP transport server. */
+export interface HttpTransportOptions {
 	ngrok?: boolean;
 	port?: number;
 	/** Session idle timeout in milliseconds. Sessions without activity for this duration will be automatically cleaned up. Default: 1 hour (3600000ms) */
 	sessionTimeoutMs?: number;
 }
 
-interface SessionData {
+/** Data associated with an active MCP session. */
+export interface SessionData {
 	server: McpServer;
 	transport: StreamableHTTPServerTransport;
 	lastActivity: number;
 }
 
 /**
- * Starts the HTTP transport server.
- * @param options - HTTP transport options.
+ * Creates an Express app with MCP HTTP transport routes.
+ * @param bridge - The MCP bridge instance.
+ * @param sessions - Map to store active sessions.
+ * @returns Configured Express application.
  */
-export async function startHttpTransport(options: HttpTransportOptions = {}): Promise<void> {
-	const port = options.port ?? HTTP_DEFAULT_PORT;
-	const sessionTimeoutMs = options.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
-	const sessions = new Map<string, SessionData>();
-
-	const bridge = new McpBridge();
-	await bridge.initialize();
-
-	bridge.onToolsChanged(async () => {
-		for (const [sessionId, session] of sessions) {
-			try {
-				await session.server.sendToolListChanged();
-			} catch (error) {
-				log(`Failed to notify session ${sessionId}:`, error);
-			}
-		}
-	});
-
+export function createHttpTransportApp(bridge: McpBridge, sessions: Map<string, SessionData>): Express {
 	const createSession = (sessionId: string): SessionData => {
 		const server = bridge.createServer();
 		const sessionData: SessionData = { server, transport: null!, lastActivity: Date.now() };
@@ -57,14 +45,11 @@ export async function startHttpTransport(options: HttpTransportOptions = {}): Pr
 		const transport = new StreamableHTTPServerTransport({
 			sessionIdGenerator: () => sessionId,
 			onsessioninitialized: (id) => {
-				// Only register session after transport has successfully initialized
-				// This prevents zombie sessions from failed connections
 				log(`Session initialized: ${id}`);
 				sessions.set(id, sessionData);
 			},
 		});
 
-		// Set up onclose handler to clean up transport when closed
 		transport.onclose = () => {
 			const sid = transport.sessionId;
 			if (sid && sessions.has(sid)) {
@@ -91,17 +76,43 @@ export async function startHttpTransport(options: HttpTransportOptions = {}): Pr
 	app.post("/mcp", async (req: Request, res: Response) => {
 		const sessionId = req.headers["mcp-session-id"] as string | undefined;
 
-		let session: SessionData;
-		if (sessionId && sessions.has(sessionId)) {
-			session = sessions.get(sessionId)!;
-			session.lastActivity = Date.now();
-		} else {
-			const newSessionId = crypto.randomUUID();
-			session = createSession(newSessionId);
-			await session.server.connect(session.transport as unknown as Transport);
-		}
+		try {
+			let session: SessionData;
 
-		await session.transport.handleRequest(req, res, req.body as unknown);
+			if (sessionId && sessions.has(sessionId)) {
+				session = sessions.get(sessionId)!;
+				session.lastActivity = Date.now();
+			} else if (!sessionId && isInitializeRequest(req.body)) {
+				const newSessionId = crypto.randomUUID();
+				session = createSession(newSessionId);
+				await session.server.connect(session.transport as unknown as Transport);
+				log(`New session created: ${newSessionId}`);
+			} else {
+				res.status(400).json({
+					jsonrpc: "2.0",
+					error: {
+						code: -32000,
+						message: "Bad Request: No valid session ID provided.",
+					},
+					id: null,
+				});
+				return;
+			}
+
+			await session.transport.handleRequest(req, res, req.body as unknown);
+		} catch (error) {
+			log("Error handling MCP POST request:", error);
+			if (!res.headersSent) {
+				res.status(500).json({
+					jsonrpc: "2.0",
+					error: {
+						code: -32603,
+						message: "Internal server error",
+					},
+					id: null,
+				});
+			}
+		}
 	});
 
 	app.get("/mcp", async (req: Request, res: Response) => {
@@ -140,6 +151,33 @@ export async function startHttpTransport(options: HttpTransportOptions = {}): Pr
 			res.status(404).json({ error: "Session not found" });
 		}
 	});
+
+	return app;
+}
+
+/**
+ * Starts the HTTP transport server.
+ * @param options - HTTP transport options.
+ */
+export async function startHttpTransport(options: HttpTransportOptions = {}): Promise<void> {
+	const port = options.port ?? HTTP_DEFAULT_PORT;
+	const sessionTimeoutMs = options.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
+	const sessions = new Map<string, SessionData>();
+
+	const bridge = new McpBridge();
+	await bridge.initialize();
+
+	bridge.onToolsChanged(async () => {
+		for (const [sessionId, session] of sessions) {
+			try {
+				await session.server.sendToolListChanged();
+			} catch (error) {
+				log(`Failed to notify session ${sessionId}:`, error);
+			}
+		}
+	});
+
+	const app = createHttpTransportApp(bridge, sessions);
 
 	let httpServer: HttpServer;
 
