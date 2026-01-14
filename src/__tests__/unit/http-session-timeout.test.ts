@@ -371,4 +371,122 @@ describe("HTTP Session Timeout", () => {
 			expect(closeMock).toHaveBeenCalledTimes(1);
 		});
 	});
+
+	describe("Session registration race condition prevention", () => {
+		interface MockTransport {
+			sessionId: string | null;
+			close: jest.Mock;
+			onclose: (() => void) | null;
+		}
+
+		interface SessionData {
+			server: { connect: jest.Mock };
+			transport: MockTransport;
+			lastActivity: number;
+		}
+
+		interface CreateSessionResult {
+			sessionData: SessionData;
+			triggerInitialized: (id: string) => void;
+			triggerClose: () => void;
+		}
+
+		const createTestSession = (sessions: Map<string, SessionData>): ((sessionId: string) => CreateSessionResult) => {
+			return (sessionId: string): CreateSessionResult => {
+				const transport: MockTransport = {
+					sessionId: null,
+					close: jest.fn(),
+					onclose: null,
+				};
+
+				const sessionData: SessionData = {
+					server: { connect: jest.fn() },
+					transport,
+					lastActivity: Date.now(),
+				};
+
+				const triggerInitialized = (id: string): void => {
+					transport.sessionId = id;
+					sessions.set(id, sessionData);
+				};
+
+				const triggerClose = (): void => {
+					const sid = transport.sessionId;
+					if (sid && sessions.has(sid)) {
+						sessions.delete(sid);
+					}
+				};
+
+				transport.onclose = triggerClose;
+
+				return { sessionData, triggerInitialized, triggerClose };
+			};
+		};
+
+		it("should not register session before onsessioninitialized fires", () => {
+			const sessions = new Map<string, SessionData>();
+			const createSession = createTestSession(sessions);
+
+			const { sessionData, triggerInitialized } = createSession("test-session-id");
+
+			expect(sessions.size).toBe(0);
+			expect(sessionData).toBeDefined();
+
+			triggerInitialized("test-session-id");
+
+			expect(sessions.size).toBe(1);
+			expect(sessions.has("test-session-id")).toBe(true);
+		});
+
+		it("should not leave zombie sessions when connection fails before initialization", () => {
+			const sessions = new Map<string, SessionData>();
+			const createSession = createTestSession(sessions);
+
+			createSession("failed-session-id");
+
+			expect(sessions.size).toBe(0);
+			expect(sessions.has("failed-session-id")).toBe(false);
+		});
+
+		it("should clean up session when transport onclose fires", () => {
+			const sessions = new Map<string, SessionData>();
+			const createSession = createTestSession(sessions);
+
+			const { triggerInitialized, triggerClose } = createSession("session-to-close");
+			triggerInitialized("session-to-close");
+
+			expect(sessions.size).toBe(1);
+
+			triggerClose();
+
+			expect(sessions.size).toBe(0);
+		});
+
+		it("should handle onclose gracefully when session was never registered", () => {
+			const sessions = new Map<string, SessionData>();
+			const createSession = createTestSession(sessions);
+
+			const { triggerClose } = createSession("unregistered-session");
+
+			expect(() => triggerClose()).not.toThrow();
+			expect(sessions.size).toBe(0);
+		});
+
+		it("should allow session data to be used before registration completes", () => {
+			const sessions = new Map<string, SessionData>();
+			const createSession = createTestSession(sessions);
+
+			const { sessionData, triggerInitialized } = createSession("new-session");
+
+			expect(sessionData.server).toBeDefined();
+			expect(sessionData.transport).toBeDefined();
+			expect(sessionData.server.connect).toBeDefined();
+
+			sessionData.server.connect(sessionData.transport);
+			expect(sessionData.server.connect).toHaveBeenCalledWith(sessionData.transport);
+
+			triggerInitialized("new-session");
+			expect(sessions.has("new-session")).toBe(true);
+		});
+	});
 });

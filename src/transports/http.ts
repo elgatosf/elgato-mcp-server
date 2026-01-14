@@ -52,13 +52,28 @@ export async function startHttpTransport(options: HttpTransportOptions = {}): Pr
 
 	const createSession = (sessionId: string): SessionData => {
 		const server = bridge.createServer();
+		const sessionData: SessionData = { server, transport: null!, lastActivity: Date.now() };
+
 		const transport = new StreamableHTTPServerTransport({
 			sessionIdGenerator: () => sessionId,
-			onsessioninitialized: (id) => log(`Session initialized: ${id}`),
+			onsessioninitialized: (id) => {
+				// Only register session after transport has successfully initialized
+				// This prevents zombie sessions from failed connections
+				log(`Session initialized: ${id}`);
+				sessions.set(id, sessionData);
+			},
 		});
 
-		const sessionData: SessionData = { server, transport, lastActivity: Date.now() };
-		sessions.set(sessionId, sessionData);
+		// Set up onclose handler to clean up transport when closed
+		transport.onclose = () => {
+			const sid = transport.sessionId;
+			if (sid && sessions.has(sid)) {
+				log(`Transport closed for session ${sid}, removing from sessions map`);
+				sessions.delete(sid);
+			}
+		};
+
+		sessionData.transport = transport;
 		return sessionData;
 	};
 
