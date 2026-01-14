@@ -164,7 +164,7 @@ export class StreamDeckClient {
 		if (this.signalServer) return;
 
 		// Clean up existing socket file on Unix platforms
-		if (process.platform === "darwin") {
+		if (process.platform !== "win32") {
 			try {
 				fs.unlinkSync(SIGNAL_SOCKET_PATH);
 			} catch {
