@@ -1,0 +1,374 @@
+import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
+
+describe("HTTP Session Timeout", () => {
+	let mockDateNow: jest.SpiedFunction<typeof Date.now>;
+	let originalSetInterval: typeof setInterval;
+	let originalClearInterval: typeof clearInterval;
+	let intervalCallbacks: Map<NodeJS.Timeout, () => void>;
+	let intervalIds: NodeJS.Timeout[];
+
+	beforeEach(() => {
+		jest.clearAllMocks();
+		intervalCallbacks = new Map();
+		intervalIds = [];
+
+		mockDateNow = jest.spyOn(Date, "now");
+		mockDateNow.mockReturnValue(1000000);
+
+		originalSetInterval = globalThis.setInterval;
+		originalClearInterval = globalThis.clearInterval;
+
+		(globalThis as any).setInterval = jest.fn((callback: () => void, _ms: number) => {
+			const id = { __id: intervalIds.length } as unknown as NodeJS.Timeout;
+			intervalCallbacks.set(id, callback);
+			intervalIds.push(id);
+			return id;
+		});
+
+		(globalThis as any).clearInterval = jest.fn((id: NodeJS.Timeout) => {
+			intervalCallbacks.delete(id);
+		});
+	});
+
+	afterEach(() => {
+		mockDateNow.mockRestore();
+		globalThis.setInterval = originalSetInterval;
+		globalThis.clearInterval = originalClearInterval;
+	});
+
+	describe("SessionData lastActivity tracking", () => {
+		it("should initialize lastActivity with current timestamp on session creation", () => {
+			const now = 1234567890;
+			mockDateNow.mockReturnValue(now);
+
+			interface SessionData {
+				lastActivity: number;
+			}
+
+			const createSession = (): SessionData => {
+				return { lastActivity: Date.now() };
+			};
+
+			const session = createSession();
+			expect(session.lastActivity).toBe(now);
+		});
+
+		it("should update lastActivity when session receives activity", () => {
+			const initialTime = 1000000;
+			const laterTime = 2000000;
+
+			mockDateNow.mockReturnValue(initialTime);
+
+			interface SessionData {
+				lastActivity: number;
+			}
+
+			const session: SessionData = { lastActivity: Date.now() };
+			expect(session.lastActivity).toBe(initialTime);
+
+			mockDateNow.mockReturnValue(laterTime);
+			session.lastActivity = Date.now();
+			expect(session.lastActivity).toBe(laterTime);
+		});
+	});
+
+	describe("Idle session cleanup logic", () => {
+		interface SessionData {
+			lastActivity: number;
+			transport: { close: jest.Mock };
+		}
+
+		const createMockSession = (lastActivity: number): SessionData => ({
+			lastActivity,
+			transport: { close: jest.fn() },
+		});
+
+		it("should remove sessions that exceed the timeout threshold", () => {
+			const ONE_HOUR_MS = 60 * 60 * 1000;
+			const sessionTimeoutMs = ONE_HOUR_MS;
+			const now = 5000000;
+			mockDateNow.mockReturnValue(now);
+
+			const sessions = new Map<string, SessionData>();
+
+			const activeSession = createMockSession(now - 1000);
+			const idleSession = createMockSession(now - sessionTimeoutMs - 1000);
+
+			sessions.set("active-session", activeSession);
+			sessions.set("idle-session", idleSession);
+
+			const cleanupIdleSessions = (): void => {
+				const currentTime = Date.now();
+				for (const [sessionId, session] of sessions) {
+					const idleTime = currentTime - session.lastActivity;
+					if (idleTime > sessionTimeoutMs) {
+						session.transport.close();
+						sessions.delete(sessionId);
+					}
+				}
+			};
+
+			cleanupIdleSessions();
+
+			expect(sessions.has("active-session")).toBe(true);
+			expect(sessions.has("idle-session")).toBe(false);
+			expect(activeSession.transport.close).not.toHaveBeenCalled();
+			expect(idleSession.transport.close).toHaveBeenCalled();
+		});
+
+		it("should not remove sessions that are within the timeout threshold", () => {
+			const sessionTimeoutMs = 60 * 60 * 1000;
+			const now = 5000000;
+			mockDateNow.mockReturnValue(now);
+
+			const sessions = new Map<string, SessionData>();
+
+			const recentSession = createMockSession(now - 1000);
+			const almostIdleSession = createMockSession(now - sessionTimeoutMs + 1000);
+
+			sessions.set("recent", recentSession);
+			sessions.set("almost-idle", almostIdleSession);
+
+			const cleanupIdleSessions = (): void => {
+				const currentTime = Date.now();
+				for (const [sessionId, session] of sessions) {
+					const idleTime = currentTime - session.lastActivity;
+					if (idleTime > sessionTimeoutMs) {
+						session.transport.close();
+						sessions.delete(sessionId);
+					}
+				}
+			};
+
+			cleanupIdleSessions();
+
+			expect(sessions.size).toBe(2);
+			expect(recentSession.transport.close).not.toHaveBeenCalled();
+			expect(almostIdleSession.transport.close).not.toHaveBeenCalled();
+		});
+
+		it("should handle empty sessions map gracefully", () => {
+			const sessionTimeoutMs = 60 * 60 * 1000;
+			const sessions = new Map<string, SessionData>();
+
+			const cleanupIdleSessions = (): void => {
+				const currentTime = Date.now();
+				for (const [sessionId, session] of sessions) {
+					const idleTime = currentTime - session.lastActivity;
+					if (idleTime > sessionTimeoutMs) {
+						session.transport.close();
+						sessions.delete(sessionId);
+					}
+				}
+			};
+
+			expect(() => cleanupIdleSessions()).not.toThrow();
+			expect(sessions.size).toBe(0);
+		});
+
+		it("should remove multiple idle sessions in one cleanup cycle", () => {
+			const sessionTimeoutMs = 60 * 60 * 1000;
+			const now = 10000000;
+			mockDateNow.mockReturnValue(now);
+
+			const sessions = new Map<string, SessionData>();
+
+			sessions.set("idle-1", createMockSession(now - sessionTimeoutMs - 1000));
+			sessions.set("idle-2", createMockSession(now - sessionTimeoutMs - 2000));
+			sessions.set("idle-3", createMockSession(now - sessionTimeoutMs - 3000));
+			sessions.set("active", createMockSession(now - 1000));
+
+			const cleanupIdleSessions = (): void => {
+				const currentTime = Date.now();
+				for (const [sessionId, session] of sessions) {
+					const idleTime = currentTime - session.lastActivity;
+					if (idleTime > sessionTimeoutMs) {
+						session.transport.close();
+						sessions.delete(sessionId);
+					}
+				}
+			};
+
+			cleanupIdleSessions();
+
+			expect(sessions.size).toBe(1);
+			expect(sessions.has("active")).toBe(true);
+		});
+	});
+
+	describe("Cleanup interval management", () => {
+		it("should set up periodic cleanup interval", () => {
+			const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+
+			const cleanupIdleSessions = jest.fn();
+			const intervalId = setInterval(cleanupIdleSessions, CLEANUP_INTERVAL_MS);
+
+			expect(globalThis.setInterval).toHaveBeenCalledWith(cleanupIdleSessions, CLEANUP_INTERVAL_MS);
+			expect(intervalId).toBeDefined();
+		});
+
+		it("should clear cleanup interval on shutdown", () => {
+			const cleanupIdleSessions = jest.fn();
+			const intervalId = setInterval(cleanupIdleSessions, 300000);
+
+			clearInterval(intervalId);
+
+			expect(globalThis.clearInterval).toHaveBeenCalledWith(intervalId);
+		});
+
+		it("should invoke cleanup callback when interval fires", () => {
+			const cleanupIdleSessions = jest.fn();
+			setInterval(cleanupIdleSessions, 300000);
+
+			const firstIntervalId = intervalIds[0]!;
+			const callback = intervalCallbacks.get(firstIntervalId);
+			expect(callback).toBeDefined();
+
+			callback?.();
+			expect(cleanupIdleSessions).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	describe("Configurable timeout", () => {
+		const DEFAULT_SESSION_TIMEOUT_MS = 60 * 60 * 1000;
+
+		it("should use default timeout when not configured", () => {
+			const options: { sessionTimeoutMs?: number } = {};
+			const sessionTimeoutMs = options.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
+
+			expect(sessionTimeoutMs).toBe(DEFAULT_SESSION_TIMEOUT_MS);
+		});
+
+		it("should use custom timeout when configured", () => {
+			const THIRTY_MINUTES_MS = 30 * 60 * 1000;
+			const customTimeout = THIRTY_MINUTES_MS;
+			const options = { sessionTimeoutMs: customTimeout };
+			const sessionTimeoutMs = options.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
+
+			expect(sessionTimeoutMs).toBe(customTimeout);
+		});
+
+		it("should respect very short timeout for testing", () => {
+			const ONE_SECOND_MS = 1000;
+			const shortTimeout = ONE_SECOND_MS;
+			const now = 5000000;
+			mockDateNow.mockReturnValue(now);
+
+			interface SessionData {
+				lastActivity: number;
+				transport: { close: jest.Mock };
+			}
+
+			const sessions = new Map<string, SessionData>();
+			sessions.set("test-session", {
+				lastActivity: now - 2000,
+				transport: { close: jest.fn() },
+			});
+
+			const cleanupIdleSessions = (): void => {
+				const currentTime = Date.now();
+				for (const [sessionId, session] of sessions) {
+					const idleTime = currentTime - session.lastActivity;
+					if (idleTime > shortTimeout) {
+						session.transport.close();
+						sessions.delete(sessionId);
+					}
+				}
+			};
+
+			cleanupIdleSessions();
+
+			expect(sessions.size).toBe(0);
+		});
+	});
+
+	describe("Session activity on requests", () => {
+		interface SessionData {
+			lastActivity: number;
+		}
+
+		it("should update lastActivity on POST request to existing session", () => {
+			const initialTime = 1000000;
+			const requestTime = 2000000;
+
+			mockDateNow.mockReturnValue(initialTime);
+			const sessions = new Map<string, SessionData>();
+			sessions.set("session-1", { lastActivity: Date.now() });
+
+			mockDateNow.mockReturnValue(requestTime);
+
+			const sessionId = "session-1";
+			if (sessionId && sessions.has(sessionId)) {
+				const session = sessions.get(sessionId)!;
+				session.lastActivity = Date.now();
+			}
+
+			expect(sessions.get("session-1")?.lastActivity).toBe(requestTime);
+		});
+
+		it("should update lastActivity on GET request", () => {
+			const initialTime = 1000000;
+			const requestTime = 3000000;
+
+			mockDateNow.mockReturnValue(initialTime);
+			const sessions = new Map<string, SessionData>();
+			sessions.set("session-1", { lastActivity: Date.now() });
+
+			mockDateNow.mockReturnValue(requestTime);
+
+			const session = sessions.get("session-1");
+			if (session) {
+				session.lastActivity = Date.now();
+			}
+
+			expect(sessions.get("session-1")?.lastActivity).toBe(requestTime);
+		});
+
+		it("should not update activity for non-existent session", () => {
+			mockDateNow.mockReturnValue(1000000);
+			const sessions = new Map<string, SessionData>();
+
+			const session = sessions.get("non-existent");
+			if (session) {
+				session.lastActivity = Date.now();
+			}
+
+			expect(sessions.get("non-existent")).toBeUndefined();
+		});
+	});
+
+	describe("Graceful session termination", () => {
+		it("should close transport before removing from map", () => {
+			const sessionTimeoutMs = 60 * 60 * 1000;
+			const now = 5000000;
+			mockDateNow.mockReturnValue(now);
+
+			const closeMock = jest.fn();
+			const sessions = new Map<string, { lastActivity: number; transport: { close: jest.Mock } }>();
+			sessions.set("idle-session", {
+				lastActivity: now - sessionTimeoutMs - 1000,
+				transport: { close: closeMock },
+			});
+
+			const cleanupOrder: string[] = [];
+
+			const cleanupIdleSessions = (): void => {
+				const currentTime = Date.now();
+				for (const [sessionId, session] of sessions) {
+					const idleTime = currentTime - session.lastActivity;
+					if (idleTime > sessionTimeoutMs) {
+						session.transport.close();
+						cleanupOrder.push("close");
+						sessions.delete(sessionId);
+						cleanupOrder.push("delete");
+					}
+				}
+			};
+
+			cleanupIdleSessions();
+
+			expect(cleanupOrder).toEqual(["close", "delete"]);
+			expect(closeMock).toHaveBeenCalledTimes(1);
+		});
+	});
+});

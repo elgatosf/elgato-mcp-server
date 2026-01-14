@@ -9,14 +9,23 @@ import { HTTP_DEFAULT_PORT } from "../constants.js";
 import { McpBridge } from "../McpBridge.js";
 import { log } from "../utils.js";
 
+/** Default session timeout: 1 hour in milliseconds */
+const DEFAULT_SESSION_TIMEOUT_MS = 60 * 60 * 1000;
+
+/** Cleanup interval: check for idle sessions every 5 minutes */
+const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+
 interface HttpTransportOptions {
 	ngrok?: boolean;
 	port?: number;
+	/** Session idle timeout in milliseconds. Sessions without activity for this duration will be automatically cleaned up. Default: 1 hour (3600000ms) */
+	sessionTimeoutMs?: number;
 }
 
 interface SessionData {
 	server: McpServer;
 	transport: StreamableHTTPServerTransport;
+	lastActivity: number;
 }
 
 /**
@@ -25,6 +34,7 @@ interface SessionData {
  */
 export async function startHttpTransport(options: HttpTransportOptions = {}): Promise<void> {
 	const port = options.port ?? HTTP_DEFAULT_PORT;
+	const sessionTimeoutMs = options.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
 	const sessions = new Map<string, SessionData>();
 
 	const bridge = new McpBridge();
@@ -47,7 +57,7 @@ export async function startHttpTransport(options: HttpTransportOptions = {}): Pr
 			onsessioninitialized: (id) => log(`Session initialized: ${id}`),
 		});
 
-		const sessionData: SessionData = { server, transport };
+		const sessionData: SessionData = { server, transport, lastActivity: Date.now() };
 		sessions.set(sessionId, sessionData);
 		return sessionData;
 	};
@@ -69,6 +79,7 @@ export async function startHttpTransport(options: HttpTransportOptions = {}): Pr
 		let session: SessionData;
 		if (sessionId && sessions.has(sessionId)) {
 			session = sessions.get(sessionId)!;
+			session.lastActivity = Date.now();
 		} else {
 			const newSessionId = crypto.randomUUID();
 			session = createSession(newSessionId);
@@ -92,6 +103,7 @@ export async function startHttpTransport(options: HttpTransportOptions = {}): Pr
 			return;
 		}
 
+		session.lastActivity = Date.now();
 		await session.transport.handleRequest(req, res);
 	});
 
@@ -125,20 +137,38 @@ export async function startHttpTransport(options: HttpTransportOptions = {}): Pr
 
 	if (options.ngrok) {
 		const ngrok = await import("@ngrok/ngrok");
-		await ngrok.forward({
-			addr: port,
-			authtoken_from_env: true,
-		}).then((listener) => {
-			log(`ngrok tunnel: ${listener.url()}`);
-			return listener;
-		}).catch((error) => {
-			log("Failed to start ngrok tunnel:", error);
-			log("Make sure NGROK_AUTHTOKEN is set");
-			return null;
-		});
+		await ngrok
+			.forward({
+				addr: port,
+				authtoken_from_env: true,
+			})
+			.then((listener) => {
+				log(`ngrok tunnel: ${listener.url()}`);
+				return listener;
+			})
+			.catch((error) => {
+				log("Failed to start ngrok tunnel:", error);
+				log("Make sure NGROK_AUTHTOKEN is set");
+				return null;
+			});
 	}
 
+	const cleanupIdleSessions = (): void => {
+		const now = Date.now();
+		for (const [sessionId, session] of sessions) {
+			const idleTime = now - session.lastActivity;
+			if (idleTime > sessionTimeoutMs) {
+				session.transport.close();
+				sessions.delete(sessionId);
+				log(`Session ${sessionId} timed out after ${Math.round(idleTime / 1000)}s of inactivity`);
+			}
+		}
+	};
+
+	const cleanupIntervalId = setInterval(cleanupIdleSessions, CLEANUP_INTERVAL_MS);
+
 	const cleanup = (): void => {
+		clearInterval(cleanupIntervalId);
 		for (const session of sessions.values()) {
 			session.transport.close();
 		}
