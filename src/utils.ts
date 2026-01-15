@@ -68,12 +68,13 @@ export function parseCliArgs(args: string[]): CliOptions {
 	// Handle --http shorthand by setting transport to "http"
 	const transport = values.http ? "http" : (values.transport as "http" | "stdio");
 
-	// Parse port string to number
+	// Parse port string to number and validate range
 	const port = parseInt(values.port as string, 10);
+	const validPort = !isNaN(port) && port >= 1 && port <= 65535 ? port : 9090;
 
 	return {
 		transport,
-		port: isNaN(port) ? 9090 : port,
+		port: validPort,
 		ngrok: values.ngrok as boolean,
 		help: values.help as boolean,
 	};
