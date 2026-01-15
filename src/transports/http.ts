@@ -6,7 +6,7 @@ import cors from "cors";
 import express, { type Express, type Request, type Response } from "express";
 import type { Server as HttpServer } from "node:http";
 
-import { HTTP_DEFAULT_PORT } from "../constants.js";
+import { HTTP_DEFAULT_PORT, MCP_ERROR_CODES } from "../constants.js";
 import { McpBridge } from "../McpBridge.js";
 import { log } from "../utils.js";
 
@@ -127,7 +127,7 @@ export function createHttpTransportApp(
 				res.status(400).json({
 					jsonrpc: "2.0",
 					error: {
-						code: -32000,
+						code: MCP_ERROR_CODES.SERVER_ERROR,
 						message: "Bad Request: No valid session ID provided.",
 					},
 					id: null,
@@ -142,7 +142,7 @@ export function createHttpTransportApp(
 				res.status(500).json({
 					jsonrpc: "2.0",
 					error: {
-						code: -32603,
+						code: MCP_ERROR_CODES.INTERNAL_ERROR,
 						message: "Internal server error",
 					},
 					id: null,

@@ -5,6 +5,7 @@ import { McpBridge } from "../../McpBridge.js";
 import type { StreamDeckClient } from "../../StreamDeckClient.js";
 import { createHttpTransportApp, type SessionData } from "../../transports/http.js";
 import { createMockServerInfo, createMockTool } from "../helpers/testUtils.js";
+import { MCP_ERROR_CODES } from "../../constants.js";
 
 interface JsonRpcResponse {
 	jsonrpc: string;
@@ -109,7 +110,7 @@ describe("HTTP Session Lifecycle Integration Tests", () => {
 
 			expect(response.status).toBe(400);
 			const body = (await response.json()) as JsonRpcResponse;
-			expect(body.error?.code).toBe(-32000);
+			expect(body.error?.code).toBe(MCP_ERROR_CODES.SERVER_ERROR);
 			expect(body.error?.message).toContain("No valid session ID provided.");
 		});
 
@@ -192,7 +193,7 @@ describe("HTTP Session Lifecycle Integration Tests", () => {
 
 			expect(response.status).toBe(400);
 			const body = (await response.json()) as JsonRpcResponse;
-			expect(body.error?.code).toBe(-32000);
+			expect(body.error?.code).toBe(MCP_ERROR_CODES.SERVER_ERROR);
 			expect(body.error?.message).toContain("No valid session ID provided.");
 		});
 

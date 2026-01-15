@@ -30,3 +30,12 @@ export const DEFAULT_SERVER_INFO: ServerInfo = {
 
 /** Log message prefix. */
 export const LOG_PREFIX = "[MCP Bridge]";
+
+/** MCP error codes. */
+export const MCP_ERROR_CODES = {
+	INVALID_REQUEST: -32600,
+	METHOD_NOT_FOUND: -32601,
+	INVALID_PARAMS: -32602,
+	INTERNAL_ERROR: -32603,
+	SERVER_ERROR: -32000,
+} as const;
