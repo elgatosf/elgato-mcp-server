@@ -263,5 +263,27 @@ describe("McpBridge", () => {
 			expect(mcpServer).toBeDefined();
 		});
 	});
+
+	describe("tools/list handler", () => {
+		it("should return empty list when disconnected even if cache exists", async () => {
+			(mockClient as any).isConnected = false;
+			(bridge as any).cachedTools = [createMockTool({ name: "cached_tool" })];
+
+			const fakeServer = {
+				server: {
+					setRequestHandler: jest.fn(),
+				},
+			} as any;
+
+			(bridge as any).registerHandlers(fakeServer);
+
+			const listHandler = fakeServer.server.setRequestHandler.mock.calls[0]?.[1];
+			expect(listHandler).toBeDefined();
+
+			const result = await listHandler();
+			expect(result).toEqual({ tools: [] });
+			expect(mockClient.getTools).not.toHaveBeenCalled();
+		});
+	});
 });
 

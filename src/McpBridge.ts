@@ -137,7 +137,10 @@ export class McpBridge {
 		const server = mcpServer.server;
 
 		server.setRequestHandler(ListToolsRequestSchema, async (): Promise<ListToolsResult> => {
-			if (this.client.isConnected && this.cachedTools.length === 0) {
+			if (!this.client.isConnected) {
+				return { tools: [] };
+			}
+			if (this.cachedTools.length === 0) {
 				await this.refreshTools();
 			}
 			return { tools: this.cachedTools };
