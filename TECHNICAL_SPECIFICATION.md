@@ -222,10 +222,12 @@ Communication with Stream Deck uses JSON messages terminated by newline (`\n`).
 ```json
 {
   "id": "1",
-  "name": "streamdeck-mcp",
-  "version": "1.0.0",
-  "title": "Stream Deck MCP Server",
-  "icons": [...]
+  "result": {
+    "name": "streamdeck-mcp",
+    "version": "1.0.0",
+    "title": "Stream Deck MCP Server",
+    "icons": [...]
+  }
 }
 ```
 
