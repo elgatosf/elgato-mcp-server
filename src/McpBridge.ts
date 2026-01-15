@@ -63,7 +63,7 @@ export class McpBridge {
 			},
 			{
 				capabilities: {
-					tools: {},
+					tools: { listChanged: true },
 				},
 			},
 		);

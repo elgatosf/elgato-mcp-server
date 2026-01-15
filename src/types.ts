@@ -127,7 +127,6 @@ export interface ToolsListResponse extends ResponseBase {
  * Call tool result.
  */
 export interface CallToolResult {
-	success: boolean;
 	data?: unknown;
 	error?: string;
 }
