@@ -237,10 +237,31 @@ export async function startHttpTransport(options: HttpTransportOptions = {}): Pr
 
 	let httpServer: HttpServer;
 
-	await new Promise<void>((resolve) => {
+	await new Promise<void>((resolve, reject) => {
 		httpServer = app.listen(port, () => {
 			log(`HTTP server listening on port ${port}`);
 			resolve();
+		});
+
+		httpServer.on("error", (error: NodeJS.ErrnoException) => {
+			let message: string;
+
+			switch (error.code) {
+				case "EADDRINUSE":
+					message = `Port ${port} is already in use. Please choose a different port or stop the process using port ${port}.`;
+					break;
+				case "EACCES":
+					message = `Permission denied to bind to port ${port}. Try using a port number above 1024 or run with elevated privileges.`;
+					break;
+				case "EADDRNOTAVAIL":
+					message = `Address not available for port ${port}. The requested address is not valid for this machine.`;
+					break;
+				default:
+					message = `Failed to start HTTP server on port ${port}: ${error.message}`;
+			}
+
+			log(`HTTP server error: ${message}`);
+			reject(new Error(message));
 		});
 	});
 
