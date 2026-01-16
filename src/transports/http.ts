@@ -6,15 +6,9 @@ import cors from "cors";
 import express, { type Express, type Request, type Response } from "express";
 import type { Server as HttpServer } from "node:http";
 
-import { HTTP_DEFAULT_PORT, MCP_ERROR_CODES } from "../constants.js";
+import { HTTP_DEFAULT_PORT, MCP_ERROR_CODES, DEFAULT_SESSION_TIMEOUT_MS, CLEANUP_INTERVAL_MS } from "../constants.js";
 import { McpBridge } from "../McpBridge.js";
 import { log } from "../utils.js";
-
-/** Default session timeout: 1 hour in milliseconds */
-const DEFAULT_SESSION_TIMEOUT_MS = 60 * 60 * 1000;
-
-/** Cleanup interval: check for idle sessions every 5 minutes */
-const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 
 /** Options for configuring the HTTP transport server. */
 export interface HttpTransportOptions {
@@ -29,6 +23,26 @@ export interface SessionData {
 	server: McpServer;
 	transport: StreamableHTTPServerTransport;
 	lastActivity: number;
+}
+
+/**
+ * Removes idle sessions that exceed the timeout threshold.
+ * @param sessions - Map of active sessions to check
+ * @param sessionTimeoutMs - Maximum idle time in milliseconds before cleanup
+ */
+export function cleanupIdleSessions(
+	sessions: Map<string, SessionData>,
+	sessionTimeoutMs: number,
+): void {
+	const now = Date.now();
+	for (const [sessionId, session] of sessions) {
+		const idleTime = now - session.lastActivity;
+		if (idleTime > sessionTimeoutMs) {
+			session.transport.close();
+			sessions.delete(sessionId);
+			log(`Session ${sessionId} timed out after ${Math.round(idleTime / 1000)}s of inactivity`);
+		}
+	}
 }
 
 /**
@@ -265,19 +279,9 @@ export async function startHttpTransport(options: HttpTransportOptions = {}): Pr
 		});
 	});
 
-	const cleanupIdleSessions = (): void => {
-		const now = Date.now();
-		for (const [sessionId, session] of sessions) {
-			const idleTime = now - session.lastActivity;
-			if (idleTime > sessionTimeoutMs) {
-				session.transport.close();
-				sessions.delete(sessionId);
-				log(`Session ${sessionId} timed out after ${Math.round(idleTime / 1000)}s of inactivity`);
-			}
-		}
-	};
-
-	const cleanupIntervalId = setInterval(cleanupIdleSessions, CLEANUP_INTERVAL_MS);
+	const cleanupIntervalId = setInterval(() => {
+		cleanupIdleSessions(sessions, sessionTimeoutMs);
+	}, CLEANUP_INTERVAL_MS);
 
 	const cleanup = (): void => {
 		clearInterval(cleanupIntervalId);

@@ -22,6 +22,12 @@ export const MAX_BUFFER_SIZE = 1024 * 1024;
 /** Default HTTP server port. */
 export const HTTP_DEFAULT_PORT = 9090;
 
+/** Default session timeout: 1 hour in milliseconds */
+export const DEFAULT_SESSION_TIMEOUT_MS = 60 * 60 * 1000;
+
+/** Cleanup interval: check for idle sessions every 5 minutes */
+export const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+
 /** Default server info when Stream Deck is not connected. */
 export const DEFAULT_SERVER_INFO: ServerInfo = {
 	name: "Stream Deck MCP Server",
