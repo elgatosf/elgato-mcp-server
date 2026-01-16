@@ -7,6 +7,7 @@ export class MockSocket extends EventEmitter {
 	public destroyed = false;
 	public writable = true;
 	public readable = true;
+	public ended = false;
 	private writeBuffer: string[] = [];
 
 	/**
@@ -34,6 +35,7 @@ export class MockSocket extends EventEmitter {
 	 * Simulates ending the socket connection.
 	 */
 	public end(): void {
+		this.ended = true;
 		this.writable = false;
 		this.emit("end");
 	}

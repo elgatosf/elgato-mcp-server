@@ -354,8 +354,12 @@ describe("StreamDeckClient", () => {
 		it("should start signal listener", () => {
 			client.startSignalListener();
 
-			// Would need to mock net.createServer to test this
-			expect(mockServer).toBeDefined();
+			// Verify the server is listening
+			expect(mockServer.isListening()).toBe(true);
+
+			// Verify cleanup works - disconnect should close the server
+			client.disconnect();
+			expect(mockServer.isListening()).toBe(false);
 		});
 
 		it("should handle reconnection signal", async () => {
@@ -366,6 +370,9 @@ describe("StreamDeckClient", () => {
 
 			client.startSignalListener();
 
+			// Verify server is listening
+			expect(mockServer.isListening()).toBe(true);
+
 			// Simulate signal connection
 			const signalSocket = new MockSocket();
 			mockServer.simulateConnection(signalSocket as any);
@@ -373,13 +380,19 @@ describe("StreamDeckClient", () => {
 			// Wait a bit for async operations
 			await wait(50);
 
+			// Verify the signal socket was ended (closed)
+			expect(signalSocket.ended).toBe(true);
+
 			// Simulate successful reconnection
 			mockSocket.simulateConnect();
 
 			await wait(50);
 
-			// Would need proper mocking to test this
-			expect(mockServer).toBeDefined();
+			// Verify the client is now connected
+			expect(client.isConnected).toBe(true);
+
+			// Verify the callback was called
+			expect(callbackCalled).toBe(true);
 		});
 	});
 
