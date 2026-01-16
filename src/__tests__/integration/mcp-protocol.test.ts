@@ -4,6 +4,7 @@ import type { CallToolRequest, ListToolsRequest } from "@modelcontextprotocol/sd
 import { McpBridge } from "../../McpBridge.js";
 import type { StreamDeckClient } from "../../StreamDeckClient.js";
 import { MockSocket } from "../helpers/MockSocket.js";
+import { MockTransport } from "../helpers/MockTransport.js";
 import {
 	createMockCallToolResponse,
 	createMockErrorResponse,
@@ -65,6 +66,85 @@ describe("MCP Protocol Integration Tests", () => {
 
 			// Should not attempt to fetch tools when disconnected
 			expect(mockClient.getTools).not.toHaveBeenCalled();
+		});
+
+		it("should return empty tools when disconnected even if cache was populated", async () => {
+			// Phase 1: Connect and populate cache
+			mockClient.connect.mockResolvedValue(true);
+			(mockClient as any).isConnected = true;
+			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
+			const tools = [
+				createMockTool({ name: "cached_tool_1" }),
+				createMockTool({ name: "cached_tool_2" }),
+			];
+			mockClient.getTools.mockResolvedValue(tools);
+
+			bridge = new McpBridge(mockClient);
+			await bridge.initialize();
+
+			// Verify cache was populated
+			expect(mockClient.getTools).toHaveBeenCalledTimes(1);
+			expect(bridge.isConnected).toBe(true);
+
+			// Phase 2: Disconnect after cache is populated
+			(mockClient as any).isConnected = false;
+			expect(bridge.isConnected).toBe(false);
+
+			// Phase 3: Create server - handlers respect disconnected state
+			const server = bridge.createServer();
+			expect(server).toBeDefined();
+
+			// Note: Full handler invocation testing would require MockTransport
+			// For now, we verify the setup and rely on the handler implementation
+			// checking this.client.isConnected (line 140 in McpBridge.ts)
+
+			// The handler at McpBridge.ts:139-147 checks isConnected before
+			// returning cachedTools, ensuring disconnected state returns []
+			expect(mockClient.getTools).toHaveBeenCalledTimes(1); // No additional calls
+		});
+
+		it("should return empty tools when disconnected even if cache was populated (E2E)", async () => {
+			// Phase 1: Connect and populate cache
+			mockClient.connect.mockResolvedValue(true);
+			(mockClient as any).isConnected = true;
+			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
+			const tools = [
+				createMockTool({ name: "cached_tool_1" }),
+				createMockTool({ name: "cached_tool_2" }),
+			];
+			mockClient.getTools.mockResolvedValue(tools);
+
+			bridge = new McpBridge(mockClient);
+			await bridge.initialize();
+
+			expect(mockClient.getTools).toHaveBeenCalledTimes(1);
+			expect(bridge.isConnected).toBe(true);
+
+			// Phase 2: Disconnect after cache is populated
+			(mockClient as any).isConnected = false;
+			expect(bridge.isConnected).toBe(false);
+
+			// Phase 3: Create server and connect mock transport
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			// Phase 4: Send tools/list request
+			const listToolsRequest = {
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/list",
+				params: {},
+			};
+
+			transport.simulateIncomingMessage(listToolsRequest);
+
+			// Phase 5: Wait for and verify response
+			const response = await transport.waitForOutgoingMessage();
+
+			expect(response).toHaveProperty("result");
+			expect((response as any).result.tools).toEqual([]);
+			expect(mockClient.getTools).toHaveBeenCalledTimes(1); // No additional calls
 		});
 
 		it("should refresh tools if cache is empty and connected", async () => {

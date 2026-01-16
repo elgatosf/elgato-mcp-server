@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, jest } from "@jest/globals";
-import type { Server as HttpServer } from "node:http";
 import { McpBridge } from "../../McpBridge.js";
 import type { StreamDeckClient } from "../../StreamDeckClient.js";
 import { MockSocket } from "../helpers/MockSocket.js";
