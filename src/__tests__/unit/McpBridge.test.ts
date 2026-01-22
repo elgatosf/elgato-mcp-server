@@ -230,8 +230,6 @@ describe("McpBridge", () => {
 
 	describe("MCP handler registration", () => {
 		let mcpServer: McpServer;
-		let listToolsHandler: (request: { params: object }) => Promise<{ tools: unknown[] }>;
-		let callToolHandler: (request: { params: { name: string; arguments?: Record<string, unknown> } }) => Promise<unknown>;
 
 		beforeEach(async () => {
 			mockClient.connect.mockResolvedValue(true);

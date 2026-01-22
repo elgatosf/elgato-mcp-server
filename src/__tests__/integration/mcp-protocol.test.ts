@@ -50,8 +50,6 @@ describe("MCP Protocol Integration Tests", () => {
 			bridge = new McpBridge(mockClient);
 			await bridge.initialize();
 
-			const server = bridge.createServer();
-
 			// The server should have tools cached
 			expect(mockClient.getTools).toHaveBeenCalled();
 		});
@@ -61,9 +59,6 @@ describe("MCP Protocol Integration Tests", () => {
 
 			bridge = new McpBridge(mockClient);
 			await bridge.initialize();
-
-			const server = bridge.createServer();
-
 			// Should not attempt to fetch tools when disconnected
 			expect(mockClient.getTools).not.toHaveBeenCalled();
 		});
@@ -157,8 +152,6 @@ describe("MCP Protocol Integration Tests", () => {
 
 			// Clear the initial call
 			mockClient.getTools.mockClear();
-
-			const server = bridge.createServer();
 
 			// When tools/list is called and cache is empty, it should refresh
 			// This would require actually calling the handler, which needs more setup
