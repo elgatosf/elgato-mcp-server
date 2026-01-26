@@ -13,6 +13,9 @@ export const SIGNAL_SOCKET_PATH =
 /** Timeout for quick connection attempts (ms). */
 export const QUICK_CONNECT_TIMEOUT_MS = 1000;
 
+/** Polling interval for reconnection attempts (ms). */
+export const RECONNECT_POLL_INTERVAL_MS = 3000;
+
 /** Timeout for IPC requests (ms). */
 export const REQUEST_TIMEOUT_MS = 30_000;
 

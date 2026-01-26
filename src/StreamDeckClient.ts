@@ -5,6 +5,7 @@ import {
 	LOG_PREFIX,
 	MAX_BUFFER_SIZE,
 	QUICK_CONNECT_TIMEOUT_MS,
+	RECONNECT_POLL_INTERVAL_MS,
 	REQUEST_TIMEOUT_MS,
 	SIGNAL_SOCKET_PATH,
 	SOCKET_PATH,
@@ -39,6 +40,7 @@ export class StreamDeckClient {
 	private buffer = "";
 	private onConnectedCallback: (() => void) | null = null;
 	private pendingRequests = new Map<string, PendingRequest>();
+	private pollInterval: NodeJS.Timeout | null = null;
 	private requestId = 0;
 	private readonly serverFactory: ServerFactory;
 	private signalServer: net.Server | null = null;
@@ -117,6 +119,11 @@ export class StreamDeckClient {
 		this.socket = null;
 		this.signalServer?.close();
 		this.signalServer = null;
+
+		if (this.pollInterval) {
+			clearInterval(this.pollInterval);
+			this.pollInterval = null;
+		}
 	}
 
 	/**
@@ -159,39 +166,12 @@ export class StreamDeckClient {
 
 	/**
 	 * Starts listening for ready signals from Stream Deck.
+	 * Attempts to create a signal server for instant notifications.
+	 * Falls back to polling only if the signal server cannot be created.
 	 */
 	public startSignalListener(): void {
-		if (this.signalServer) return;
-
-		// Clean up existing socket file on Unix platforms
-		if (process.platform !== "win32") {
-			try {
-				fs.unlinkSync(SIGNAL_SOCKET_PATH);
-			} catch {
-				// Socket file doesn't exist, which is fine
-			}
-		}
-
-		this.signalServer = this.serverFactory((connection) => {
-			console.error(`${LOG_PREFIX} Received ready signal from Stream Deck`);
-			connection.end();
-			void this.handleReadySignal();
-		});
-
-		this.signalServer.on("error", (error: NodeJS.ErrnoException) => {
-			if (error.code === "EADDRINUSE") {
-				console.error(`${LOG_PREFIX} Signal socket already in use, retrying...`);
-				setTimeout(() => {
-					this.signalServer?.close();
-					this.signalServer = null;
-					this.startSignalListener();
-				}, 1000);
-			}
-		});
-
-		this.signalServer.listen(SIGNAL_SOCKET_PATH, () => {
-			console.error(`${LOG_PREFIX} Listening for ready signals on ${SIGNAL_SOCKET_PATH}`);
-		});
+		// Try to claim the signal socket - polling will start only if this fails
+		this.tryStartSignalServer();
 	}
 
 	private handleClose(): void {
@@ -202,6 +182,12 @@ export class StreamDeckClient {
 			clearTimeout(pending.timeout);
 			pending.reject(new Error("Connection closed"));
 			this.pendingRequests.delete(id);
+		}
+
+		// Start polling for reconnection only if we don't own the signal server
+		// If we own the signal server, we'll get notified when StreamDeck is ready
+		if (!this.signalServer) {
+			this.startPolling();
 		}
 	}
 
@@ -234,6 +220,71 @@ export class StreamDeckClient {
 		if (connected && this.onConnectedCallback) {
 			this.onConnectedCallback();
 		}
+	}
+
+	/**
+	 * Handles EADDRINUSE error by checking if the socket is stale.
+	 * If stale, removes the socket file and retries binding.
+	 * If active, another process owns it - we don't retry.
+	 */
+	private handleSocketInUse(): void {
+		// On Windows, named pipes don't leave stale files
+		if (process.platform === "win32") {
+			console.error(`${LOG_PREFIX} Signal socket in use by another process`);
+			return;
+		}
+
+		// Check if the socket file exists and has an active listener
+		this.isSocketActive(SIGNAL_SOCKET_PATH).then((isActive) => {
+			if (isActive) {
+				// Another process is actively listening - don't retry
+				console.error(`${LOG_PREFIX} Signal socket in use by another process`);
+			} else {
+				// Socket file is stale - remove it and retry
+				console.error(`${LOG_PREFIX} Removing stale signal socket file`);
+				try {
+					fs.unlinkSync(SIGNAL_SOCKET_PATH);
+				} catch {
+					// File doesn't exist or can't be removed
+				}
+				// Retry binding after removing stale socket
+				this.startSignalListener();
+			}
+		});
+	}
+
+	/**
+	 * Checks if a socket file exists and has an active listener.
+	 * @param socketPath - Path to the socket file.
+	 * @returns Promise that resolves to true if socket is active, false if stale or missing.
+	 */
+	private isSocketActive(socketPath: string): Promise<boolean> {
+		return new Promise((resolve) => {
+			// Check if file exists first
+			if (!fs.existsSync(socketPath)) {
+				resolve(false);
+				return;
+			}
+
+			// Try to connect to see if there's an active listener
+			const testSocket = net.createConnection(socketPath);
+			const timeout = setTimeout(() => {
+				testSocket.destroy(); // Force close on timeout
+				resolve(false);
+			}, 100);
+
+			testSocket.on("connect", () => {
+				clearTimeout(timeout);
+				testSocket.end(); // Graceful close - we confirmed it's active
+				resolve(true);
+			});
+
+			testSocket.on("error", () => {
+				clearTimeout(timeout);
+				testSocket.destroy(); // Already errored, just clean up
+				resolve(false); // Socket file exists but no listener (stale)
+			});
+		});
 	}
 
 	private processMessage(message: string): void {
@@ -281,5 +332,49 @@ export class StreamDeckClient {
 		this.socket.on("data", (data) => this.handleData(data));
 		this.socket.on("close", () => this.handleClose());
 		this.socket.on("error", (error) => this.handleError(error));
+	}
+
+	/**
+	 * Starts polling to periodically check if Stream Deck is available.
+	 * Used as a fallback for clients that don't own the signal server.
+	 */
+	private startPolling(): void {
+		if (this.pollInterval) return;
+
+		this.pollInterval = setInterval(() => {
+			if (!this.isConnected) {
+				void this.handleReadySignal();
+			}
+		}, RECONNECT_POLL_INTERVAL_MS);
+	}
+
+	/**
+	 * Attempts to start the signal server in a non-destructive way.
+	 * If the socket is already in use by another client, starts polling as a fallback.
+	 */
+	private tryStartSignalServer(): void {
+		if (this.signalServer) return;
+
+		this.signalServer = this.serverFactory((connection) => {
+			console.error(`${LOG_PREFIX} Received ready signal from Stream Deck`);
+			connection.end();
+			void this.handleReadySignal();
+		});
+
+		this.signalServer.on("error", (error: NodeJS.ErrnoException) => {
+			if (error.code === "EADDRINUSE") {
+				// Socket is in use by another process - start polling as fallback
+				console.error(`${LOG_PREFIX} Signal socket in use by another process, relying on polling`);
+				this.signalServer?.close();
+				this.signalServer = null;
+				this.handleSocketInUse();
+				// Start polling since we don't have the signal server
+				this.startPolling();
+			}
+		});
+
+		this.signalServer.listen(SIGNAL_SOCKET_PATH, () => {
+			console.error(`${LOG_PREFIX} Listening for ready signals on ${SIGNAL_SOCKET_PATH}`);
+		});
 	}
 }
