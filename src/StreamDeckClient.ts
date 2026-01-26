@@ -382,8 +382,10 @@ export class StreamDeckClient {
 				this.signalServer?.close();
 				this.signalServer = null;
 				this.handleSocketInUse();
-				// Start polling since we don't have the signal server
-				this.startPolling();
+				// Start polling only if handleSocketInUse did not successfully recreate the signal server
+				if (!this.signalServer) {
+					this.startPolling();
+				}
 			}
 		});
 
