@@ -64,6 +64,16 @@ export class MockSocket extends EventEmitter {
 	}
 
 	/**
+	 * Simulates a close event (socket closed by remote end).
+	 */
+	public simulateClose(): void {
+		this.destroyed = true;
+		this.writable = false;
+		this.readable = false;
+		this.emit("close");
+	}
+
+	/**
 	 * Gets all written data.
 	 */
 	public getWrittenData(): string[] {

@@ -4,7 +4,7 @@ import type { Server } from "node:http";
 import { McpBridge } from "../../McpBridge.js";
 import type { StreamDeckClient } from "../../StreamDeckClient.js";
 import { createHttpTransportApp, type SessionData } from "../../transports/http.js";
-import { createMockServerInfo, createMockTool } from "../helpers/testUtils.js";
+import { createMockClient, createMockServerInfo, createMockTool } from "../helpers/testUtils.js";
 import { MCP_ERROR_CODES } from "../../constants.js";
 
 interface JsonRpcResponse {
@@ -22,17 +22,7 @@ describe("HTTP Session Lifecycle Integration Tests", () => {
 	let bridge: McpBridge;
 
 	beforeAll(async () => {
-		mockClient = {
-			isConnected: true,
-			connect: jest.fn(),
-			disconnect: jest.fn(),
-			getServerInfo: jest.fn(),
-			getTools: jest.fn(),
-			callTool: jest.fn(),
-			onConnected: jest.fn(),
-			startSignalListener: jest.fn(),
-		} as any;
-
+		mockClient = createMockClient({ isConnected: true });
 		mockClient.connect.mockResolvedValue(true);
 		mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
 		mockClient.getTools.mockResolvedValue([createMockTool()]);

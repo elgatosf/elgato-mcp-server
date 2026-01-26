@@ -2,11 +2,17 @@ import type { ServerInfo } from "./types.js";
 
 const SOCKET_BASE_NAME = "elgato-streamdeck-mcp-bridge";
 
-/** Get IPC socket path for Stream Deck communication. */
+/**
+ * Get IPC socket path for Stream Deck communication.
+ * @returns The platform-specific socket path.
+ */
 export const getSocketPath = (): string =>
 	process.platform === "win32" ? `\\\\.\\pipe\\${SOCKET_BASE_NAME}` : `/tmp/${SOCKET_BASE_NAME}.sock`;
 
-/** Get signal socket path for reconnection notifications. */
+/**
+ * Get signal socket path for reconnection notifications.
+ * @returns The platform-specific signal socket path.
+ */
 export const getSignalSocketPath = (): string =>
 	process.platform === "win32" ? `\\\\.\\pipe\\${SOCKET_BASE_NAME}-ready` : `/tmp/${SOCKET_BASE_NAME}-ready.sock`;
 

@@ -1,3 +1,5 @@
+import { jest } from "@jest/globals";
+import type { StreamDeckClient } from "../../StreamDeckClient.js";
 import type { CallToolResponse, McpTool, ServerInfo, ToolsListResponse } from "../../types.js";
 
 /**
@@ -106,3 +108,33 @@ export function createDeferred<T>(): {
 	return { promise, resolve, reject };
 }
 
+/**
+ * Creates a mock StreamDeckClient for testing.
+ * Provides a consistent mock implementation that can be customized via overrides.
+ */
+export function createMockClient(
+	overrides: Partial<{
+		isConnected: boolean;
+		connect: jest.Mock;
+		disconnect: jest.Mock;
+		getServerInfo: jest.Mock;
+		getTools: jest.Mock;
+		callTool: jest.Mock;
+		onConnected: jest.Mock;
+		onDisconnected: jest.Mock;
+		startSignalListener: jest.Mock;
+	}> = {},
+): jest.Mocked<StreamDeckClient> {
+	return {
+		isConnected: false,
+		connect: jest.fn(),
+		disconnect: jest.fn(),
+		getServerInfo: jest.fn(),
+		getTools: jest.fn(),
+		callTool: jest.fn(),
+		onConnected: jest.fn(),
+		onDisconnected: jest.fn(),
+		startSignalListener: jest.fn(),
+		...overrides,
+	} as unknown as jest.Mocked<StreamDeckClient>;
+}

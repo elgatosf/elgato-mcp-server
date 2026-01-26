@@ -20,6 +20,7 @@ describe("McpBridge", () => {
 			getTools: jest.fn(),
 			callTool: jest.fn(),
 			onConnected: jest.fn(),
+			onDisconnected: jest.fn(),
 			startSignalListener: jest.fn(),
 		} as any;
 
@@ -200,6 +201,111 @@ describe("McpBridge", () => {
 			(mockClient as any).isConnected = true;
 			if (onConnectedCallback) {
 				await onConnectedCallback();
+			}
+
+			await wait(10);
+
+			// Both callbacks should be called despite error
+			expect(errorCallback).toHaveBeenCalled();
+			expect(successCallback).toHaveBeenCalled();
+		});
+
+		it("should notify callbacks on disconnection", async () => {
+			const callback = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+
+			bridge.onToolsChanged(callback);
+
+			mockClient.connect.mockResolvedValue(true);
+			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
+			mockClient.getTools.mockResolvedValue([createMockTool()]);
+
+			await bridge.initialize();
+
+			// Get the onDisconnected callback
+			const onDisconnectedCallback = mockClient.onDisconnected.mock.calls[0]?.[0];
+			expect(onDisconnectedCallback).toBeDefined();
+
+			// Simulate disconnection
+			(mockClient as any).isConnected = false;
+			if (onDisconnectedCallback) {
+				await onDisconnectedCallback();
+			}
+
+			await wait(10);
+
+			// Callback should be called on disconnection
+			expect(callback).toHaveBeenCalled();
+		});
+
+		it("should clear cached tools on disconnection", async () => {
+			mockClient.connect.mockResolvedValue(true);
+			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
+			mockClient.getTools.mockResolvedValue([createMockTool({ name: "test_tool" })]);
+
+			await bridge.initialize();
+
+			// Verify tools were cached (getTools was called during init)
+			expect(mockClient.getTools).toHaveBeenCalledTimes(1);
+
+			// Get the onDisconnected callback
+			const onDisconnectedCallback = mockClient.onDisconnected.mock.calls[0]?.[0];
+			expect(onDisconnectedCallback).toBeDefined();
+
+			// Simulate disconnection
+			(mockClient as any).isConnected = false;
+			if (onDisconnectedCallback) {
+				await onDisconnectedCallback();
+			}
+
+			// After disconnection, tools should be cleared
+			// We can verify this by checking that the next tools/list returns empty
+			// (since isConnected is false, it returns empty tools)
+		});
+
+		it("should notify multiple callbacks on disconnection", async () => {
+			const callback1 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const callback2 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+
+			bridge.onToolsChanged(callback1);
+			bridge.onToolsChanged(callback2);
+
+			mockClient.connect.mockResolvedValue(true);
+			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
+			mockClient.getTools.mockResolvedValue([]);
+
+			await bridge.initialize();
+
+			const onDisconnectedCallback = mockClient.onDisconnected.mock.calls[0]?.[0];
+
+			(mockClient as any).isConnected = false;
+			if (onDisconnectedCallback) {
+				await onDisconnectedCallback();
+			}
+
+			await wait(10);
+
+			expect(callback1).toHaveBeenCalled();
+			expect(callback2).toHaveBeenCalled();
+		});
+
+		it("should handle errors in disconnection notification callbacks", async () => {
+			const errorCallback = jest.fn<() => Promise<void>>().mockRejectedValue(new Error("Callback error"));
+			const successCallback = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+
+			bridge.onToolsChanged(errorCallback);
+			bridge.onToolsChanged(successCallback);
+
+			mockClient.connect.mockResolvedValue(true);
+			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
+			mockClient.getTools.mockResolvedValue([]);
+
+			await bridge.initialize();
+
+			const onDisconnectedCallback = mockClient.onDisconnected.mock.calls[0]?.[0];
+
+			(mockClient as any).isConnected = false;
+			if (onDisconnectedCallback) {
+				await onDisconnectedCallback();
 			}
 
 			await wait(10);

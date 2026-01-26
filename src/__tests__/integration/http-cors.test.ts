@@ -1,10 +1,10 @@
-import { afterAll, beforeAll, describe, expect, it, jest } from "@jest/globals";
+import { afterAll, beforeAll, describe, expect, it } from "@jest/globals";
 import type { Server } from "node:http";
 
 import { McpBridge } from "../../McpBridge.js";
 import type { StreamDeckClient } from "../../StreamDeckClient.js";
 import { createHttpTransportApp, type SessionData } from "../../transports/http.js";
-import { createMockServerInfo, createMockTool } from "../helpers/testUtils.js";
+import { createMockClient, createMockServerInfo, createMockTool } from "../helpers/testUtils.js";
 
 describe("HTTP CORS Configuration Tests", () => {
 	let server: Server;
@@ -15,17 +15,7 @@ describe("HTTP CORS Configuration Tests", () => {
 	let allowedOrigins: string[];
 
 	beforeAll(async () => {
-		mockClient = {
-			isConnected: true,
-			connect: jest.fn(),
-			disconnect: jest.fn(),
-			getServerInfo: jest.fn(),
-			getTools: jest.fn(),
-			callTool: jest.fn(),
-			onConnected: jest.fn(),
-			startSignalListener: jest.fn(),
-		} as any;
-
+		mockClient = createMockClient({ isConnected: true });
 		mockClient.connect.mockResolvedValue(true);
 		mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
 		mockClient.getTools.mockResolvedValue([createMockTool()]);

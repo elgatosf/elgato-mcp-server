@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, jest } from "@jest/globals";
 import { McpBridge } from "../../McpBridge.js";
 import type { StreamDeckClient } from "../../StreamDeckClient.js";
 import { MockSocket } from "../helpers/MockSocket.js";
-import { createMockServerInfo, createMockTool, wait } from "../helpers/testUtils.js";
+import { createMockClient, createMockServerInfo, createMockTool, wait } from "../helpers/testUtils.js";
 
 describe("Transport Integration Tests", () => {
 	let mockClient: jest.Mocked<StreamDeckClient>;
@@ -12,17 +12,7 @@ describe("Transport Integration Tests", () => {
 		jest.clearAllMocks();
 
 		mockSocket = new MockSocket();
-
-		mockClient = {
-			isConnected: false,
-			connect: jest.fn(),
-			disconnect: jest.fn(),
-			getServerInfo: jest.fn(),
-			getTools: jest.fn(),
-			callTool: jest.fn(),
-			onConnected: jest.fn(),
-			startSignalListener: jest.fn(),
-		} as any;
+		mockClient = createMockClient();
 	});
 
 	describe("stdio transport", () => {

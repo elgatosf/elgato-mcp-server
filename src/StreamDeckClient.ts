@@ -39,6 +39,7 @@ export type ServerFactory = (connectionListener?: (socket: net.Socket) => void) 
 export class StreamDeckClient {
 	private buffer = "";
 	private onConnectedCallback: (() => void) | null = null;
+	private onDisconnectedCallback: (() => void) | null = null;
 	private pendingRequests = new Map<string, PendingRequest>();
 	private pollInterval: NodeJS.Timeout | null = null;
 	private requestId = 0;
@@ -165,6 +166,14 @@ export class StreamDeckClient {
 	}
 
 	/**
+	 * Registers a callback to be invoked when Stream Deck disconnects.
+	 * @param callback - Callback function.
+	 */
+	public onDisconnected(callback: () => void): void {
+		this.onDisconnectedCallback = callback;
+	}
+
+	/**
 	 * Starts listening for ready signals from Stream Deck.
 	 * Attempts to create a signal server for instant notifications.
 	 * Falls back to polling only if the signal server cannot be created.
@@ -182,6 +191,11 @@ export class StreamDeckClient {
 			clearTimeout(pending.timeout);
 			pending.reject(new Error("Connection closed"));
 			this.pendingRequests.delete(id);
+		}
+
+		// Notify that we've disconnected
+		if (this.onDisconnectedCallback) {
+			this.onDisconnectedCallback();
 		}
 
 		// Start polling for reconnection only if we don't own the signal server

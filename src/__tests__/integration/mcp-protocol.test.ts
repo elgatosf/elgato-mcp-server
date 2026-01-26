@@ -7,6 +7,7 @@ import { MockSocket } from "../helpers/MockSocket.js";
 import { MockTransport } from "../helpers/MockTransport.js";
 import {
 	createMockCallToolResponse,
+	createMockClient,
 	createMockErrorResponse,
 	createMockServerInfo,
 	createMockTool,
@@ -22,17 +23,7 @@ describe("MCP Protocol Integration Tests", () => {
 		jest.clearAllMocks();
 
 		mockSocket = new MockSocket();
-
-		mockClient = {
-			isConnected: true,
-			connect: jest.fn(),
-			disconnect: jest.fn(),
-			getServerInfo: jest.fn(),
-			getTools: jest.fn(),
-			callTool: jest.fn(),
-			onConnected: jest.fn(),
-			startSignalListener: jest.fn(),
-		} as any;
+		mockClient = createMockClient({ isConnected: true });
 	});
 
 	afterEach(() => {

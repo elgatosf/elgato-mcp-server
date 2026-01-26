@@ -194,6 +194,12 @@ export class McpBridge {
 			await this.refreshTools();
 			await this.notifyToolsChanged();
 		});
+
+		this.client.onDisconnected(async () => {
+			log("Stream Deck disconnected, clearing tools...");
+			this.cachedTools = [];
+			await this.notifyToolsChanged();
+		});
 	}
 }
 

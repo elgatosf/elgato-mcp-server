@@ -411,6 +411,64 @@ describe("StreamDeckClient", () => {
 		});
 	});
 
+	describe("onDisconnected callback", () => {
+		it("should register onDisconnected callback", () => {
+			let called = false;
+			const callback = (): void => {
+				called = true;
+			};
+
+			client.onDisconnected(callback);
+
+			// Callback should not be called until disconnect happens
+			expect(called).toBe(false);
+		});
+
+		it("should call onDisconnected callback when socket closes", async () => {
+			let disconnectCalled = false;
+			const callback = (): void => {
+				disconnectCalled = true;
+			};
+
+			client.onDisconnected(callback);
+
+			// Connect first (must call connect() then simulate connect)
+			const connectPromise = client.connect(100);
+			mockSocket.simulateConnect();
+			await connectPromise;
+
+			expect(client.isConnected).toBe(true);
+			expect(disconnectCalled).toBe(false);
+
+			// Simulate socket close
+			mockSocket.simulateClose();
+			await wait(10);
+
+			expect(client.isConnected).toBe(false);
+			expect(disconnectCalled).toBe(true);
+		});
+
+		it("should call onDisconnected callback before starting polling", async () => {
+			const callOrder: string[] = [];
+
+			client.onDisconnected(() => {
+				callOrder.push("disconnected");
+			});
+
+			// Connect first (must call connect() then simulate connect)
+			const connectPromise = client.connect(100);
+			mockSocket.simulateConnect();
+			await connectPromise;
+
+			// Simulate socket close
+			mockSocket.simulateClose();
+			await wait(10);
+
+			// Disconnected callback should have been called
+			expect(callOrder).toContain("disconnected");
+		});
+	});
+
 	describe("polling fallback for multi-client reconnection", () => {
 		it("should start polling when connection closes and no signal server is owned", async () => {
 			jest.useFakeTimers();
