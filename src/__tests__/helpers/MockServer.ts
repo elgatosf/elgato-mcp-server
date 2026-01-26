@@ -10,17 +10,19 @@ export class MockServer extends EventEmitter {
 
 	/**
 	 * Simulates starting to listen.
+	 * Callback is called synchronously to avoid async timing issues in tests.
 	 */
 	public listen(path: string, callback?: () => void): this {
 		this.listening = true;
 		if (callback) {
-			setImmediate(callback);
+			callback();
 		}
 		return this;
 	}
 
 	/**
 	 * Simulates closing the server.
+	 * Callback is called synchronously to avoid async timing issues in tests.
 	 */
 	public close(callback?: (err?: Error) => void): this {
 		this.listening = false;
@@ -31,7 +33,7 @@ export class MockServer extends EventEmitter {
 		});
 		this.connections = [];
 		if (callback) {
-			setImmediate(callback);
+			callback();
 		}
 		return this;
 	}
