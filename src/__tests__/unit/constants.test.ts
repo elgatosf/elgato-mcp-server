@@ -23,11 +23,11 @@ describe("constants", () => {
 				configurable: true,
 			});
 
-			// Dynamically import to get fresh constants with mocked platform
-			const { SOCKET_PATH, SIGNAL_SOCKET_PATH } = await import("../../constants.js");
+			// Use the getter functions to get paths based on current platform
+			const { getSocketPath, getSignalSocketPath } = await import("../../constants.js");
 
-			expect(SOCKET_PATH).toBe("\\\\.\\pipe\\elgato-streamdeck-mcp-bridge");
-			expect(SIGNAL_SOCKET_PATH).toBe("\\\\.\\pipe\\elgato-streamdeck-mcp-bridge-ready");
+			expect(getSocketPath()).toBe("\\\\.\\pipe\\elgato-streamdeck-mcp-bridge");
+			expect(getSignalSocketPath()).toBe("\\\\.\\pipe\\elgato-streamdeck-mcp-bridge-ready");
 		});
 
 		it("should generate Unix socket path on darwin", async () => {
@@ -38,10 +38,11 @@ describe("constants", () => {
 				configurable: true,
 			});
 
-			const { SOCKET_PATH, SIGNAL_SOCKET_PATH } = await import("../../constants.js");
+			// Use the getter functions to get paths based on current platform
+			const { getSocketPath, getSignalSocketPath } = await import("../../constants.js");
 
-			expect(SOCKET_PATH).toBe("/tmp/elgato-streamdeck-mcp-bridge.sock");
-			expect(SIGNAL_SOCKET_PATH).toBe("/tmp/elgato-streamdeck-mcp-bridge-ready.sock");
+			expect(getSocketPath()).toBe("/tmp/elgato-streamdeck-mcp-bridge.sock");
+			expect(getSignalSocketPath()).toBe("/tmp/elgato-streamdeck-mcp-bridge-ready.sock");
 		});
 	});
 });

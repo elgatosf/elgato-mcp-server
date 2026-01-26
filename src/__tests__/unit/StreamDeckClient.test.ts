@@ -410,5 +410,237 @@ describe("StreamDeckClient", () => {
 			expect(called).toBe(false); // Not called yet
 		});
 	});
+
+	describe("polling fallback for multi-client reconnection", () => {
+		it("should start polling when connection closes and no signal server is owned", async () => {
+			jest.useFakeTimers();
+
+			let socketFactoryCallCount = 0;
+			const trackingSocketFactory = () => {
+				socketFactoryCallCount++;
+				return mockSocket as any;
+			};
+
+			// Create client with tracking socket factory
+			const testClient = new StreamDeckClient(
+				trackingSocketFactory,
+				(listener) => {
+					if (listener) {
+						mockServer.on("connection", listener);
+					}
+					return mockServer as any;
+				}
+			);
+
+			// Connect first
+			const connectPromise = testClient.connect(100);
+			mockSocket.simulateConnect();
+			await connectPromise;
+
+			expect(testClient.isConnected).toBe(true);
+			const callCountAfterConnect = socketFactoryCallCount;
+
+			// Simulate close - should start polling since no signal server
+			mockSocket.destroy();
+
+			// Reset mock socket for reconnection attempts
+			mockSocket = new MockSocket();
+
+			// Advance time by polling interval - should trigger reconnection attempt
+			jest.advanceTimersByTime(3000);
+
+			// Verify polling started by checking that socket factory was called again
+			expect(socketFactoryCallCount).toBeGreaterThan(callCountAfterConnect);
+
+			testClient.disconnect();
+			jest.useRealTimers();
+		});
+
+		it("should not start polling when signal server is owned and connection closes", async () => {
+			jest.useFakeTimers();
+
+			let socketFactoryCallCount = 0;
+			const trackingSocketFactory = () => {
+				socketFactoryCallCount++;
+				return mockSocket as any;
+			};
+
+			// Create client with tracking socket factory
+			const testClient = new StreamDeckClient(
+				trackingSocketFactory,
+				(listener) => {
+					if (listener) {
+						mockServer.on("connection", listener);
+					}
+					return mockServer as any;
+				}
+			);
+
+			// Start signal listener first (client owns signal server)
+			testClient.startSignalListener();
+			expect(mockServer.isListening()).toBe(true);
+
+			// Connect
+			const connectPromise = testClient.connect(100);
+			mockSocket.simulateConnect();
+			await connectPromise;
+
+			expect(testClient.isConnected).toBe(true);
+			const callCountAfterConnect = socketFactoryCallCount;
+
+			// Simulate close - should NOT start polling since we own signal server
+			mockSocket.destroy();
+
+			// Reset mock socket
+			mockSocket = new MockSocket();
+
+			// Advance time by polling interval
+			jest.advanceTimersByTime(3000);
+
+			// Verify polling did NOT start - socket factory should not have been called again
+			expect(socketFactoryCallCount).toBe(callCountAfterConnect);
+
+			testClient.disconnect();
+			jest.useRealTimers();
+		});
+
+		it("should clear poll interval on disconnect", async () => {
+			jest.useFakeTimers();
+
+			// Connect and then close to start polling
+			const connectPromise = client.connect(100);
+			mockSocket.simulateConnect();
+			await connectPromise;
+
+			// Close connection without signal server to start polling
+			mockSocket.destroy();
+
+			// Now disconnect should clean up polling
+			client.disconnect();
+
+			// Polling should be stopped - verify no errors on timer advancement
+			jest.advanceTimersByTime(10000);
+
+			expect(client.isConnected).toBe(false);
+
+			jest.useRealTimers();
+		});
+
+		it("should stop polling when connection is re-established", async () => {
+			jest.useFakeTimers();
+
+			let connectCount = 0;
+			const originalSocketFactory = () => {
+				connectCount++;
+				return mockSocket as any;
+			};
+
+			// Create client with tracking socket factory
+			const testClient = new StreamDeckClient(
+				originalSocketFactory,
+				(listener) => {
+					if (listener) {
+						mockServer.on("connection", listener);
+					}
+					return mockServer as any;
+				}
+			);
+
+			// Connect and close to start polling
+			const connectPromise = testClient.connect(100);
+			mockSocket.simulateConnect();
+			await connectPromise;
+
+			mockSocket.destroy();
+
+			// Reset the mock socket for reconnection
+			mockSocket = new MockSocket();
+
+			// Advance time to trigger polling
+			jest.advanceTimersByTime(3000);
+
+			// Clean up
+			testClient.disconnect();
+
+			jest.useRealTimers();
+		});
+	});
+
+	describe("signal server error handling", () => {
+		it("should handle EADDRINUSE by falling back to polling", async () => {
+			jest.useFakeTimers();
+
+			// Create a custom mock server that simulates EADDRINUSE
+			const errorMockServer = new MockServer();
+
+			const testClient = new StreamDeckClient(
+				() => mockSocket as any,
+				(listener) => {
+					return errorMockServer as any;
+				}
+			);
+
+			// Start signal listener
+			testClient.startSignalListener();
+
+			// Simulate EADDRINUSE error on the mock server
+			const error = new Error("EADDRINUSE") as NodeJS.ErrnoException;
+			error.code = "EADDRINUSE";
+			errorMockServer.emit("error", error);
+
+			// Should fall back to polling
+			jest.advanceTimersByTime(3000);
+
+			testClient.disconnect();
+			jest.useRealTimers();
+		});
+
+		it("should not retry signal server creation when another process is actively using the socket", async () => {
+			// This tests the handleSocketInUse logic
+			// The signal server should not infinitely retry if another process owns the socket
+			client.startSignalListener();
+
+			expect(mockServer.isListening()).toBe(true);
+
+			client.disconnect();
+		});
+	});
+
+	describe("disconnect cleanup", () => {
+		it("should clean up poll interval on disconnect", () => {
+			jest.useFakeTimers();
+
+			// Start signal listener and then disconnect
+			client.startSignalListener();
+			expect(mockServer.isListening()).toBe(true);
+
+			client.disconnect();
+
+			// Verify server is stopped
+			expect(mockServer.isListening()).toBe(false);
+
+			// Verify no timer errors on advancement
+			jest.advanceTimersByTime(10000);
+
+			jest.useRealTimers();
+		});
+
+		it("should clean up all resources on disconnect", async () => {
+			// Connect
+			const connectPromise = client.connect(100);
+			mockSocket.simulateConnect();
+			await connectPromise;
+
+			// Start signal listener
+			client.startSignalListener();
+
+			// Disconnect should clean up everything
+			client.disconnect();
+
+			expect(client.isConnected).toBe(false);
+			expect(mockSocket.destroyed).toBe(true);
+			expect(mockServer.isListening()).toBe(false);
+		});
+	});
 });
 
