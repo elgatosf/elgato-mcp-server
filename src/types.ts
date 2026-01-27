@@ -153,6 +153,19 @@ export interface PendingRequest {
 }
 
 /**
+ * Notification from Stream Deck (one-way message without id).
+ */
+export interface Notification {
+	method: string;
+	params?: unknown;
+}
+
+/**
+ * Callback function type for handling notifications from Stream Deck.
+ */
+export type NotificationCallback = (method: string, params?: unknown) => void;
+
+/**
  * Transport mode for the MCP server.
  */
 export type TransportMode = "http" | "stdio";

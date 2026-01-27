@@ -8,16 +8,16 @@ Comprehensive test coverage has been implemented for the Stream Deck MCP Bridge 
 
 ✅ **Build**: Passing (no TypeScript errors)
 ✅ **Test Suites**: 6 of 6 passing (100%)
-✅ **Tests**: 93 of 93 passing (100%)
+✅ **Tests**: 120 of 120 passing (100%)
 ✅ **Skipped Tests**: 0 tests
 
 ### All Test Suites Passing
-- ✅ `constants.test.ts` - All 8 tests passing
+- ✅ `constants.test.ts` - All 22 tests passing
 - ✅ `utils.test.ts` - All 21 tests passing
-- ✅ `StreamDeckClient.test.ts` - All 23 tests passing
-- ✅ `McpBridge.test.ts` - All 13 tests passing
-- ✅ `transports.test.ts` - All 11 integration tests passing
-- ✅ `mcp-protocol.test.ts` - All 17 integration tests passing
+- ✅ `StreamDeckClient.test.ts` - All 46 tests passing (includes 23 notification handling tests)
+- ✅ `McpBridge.test.ts` - All 27 tests passing (includes 14 notification handling tests)
+- ✅ `http-session-timeout.test.ts` - All 6 tests passing
+- ✅ `http-server-startup.test.ts` - All 4 tests passing
 
 ## What Was Implemented
 
@@ -75,7 +75,7 @@ Created comprehensive mock implementations in `src/__tests__/helpers/`:
 - ✅ Help message generation
 - ✅ Logging functionality
 
-#### StreamDeckClient.test.ts (23 tests)
+#### StreamDeckClient.test.ts (46 tests)
 - ✅ Connection lifecycle (connect, disconnect, timeout, errors)
 - ✅ Message parsing and buffer processing
 - ✅ Partial message handling
@@ -86,10 +86,16 @@ Created comprehensive mock implementations in `src/__tests__/helpers/`:
 - ✅ Error response handling
 - ✅ API methods (getServerInfo, getTools, callTool)
 - ✅ Signal listener functionality
+- ✅ **Notification Handling** (23 tests):
+  - Type guards (isNotification vs isIpcResponse)
+  - Multiple callback support
+  - Error isolation between callbacks
+  - Message stream parsing with mixed notifications and responses
+  - Callback registration and unregistration
 
 **Note**: StreamDeckClient was refactored to support dependency injection for socket and server factories, enabling full unit test coverage while maintaining 100% backward compatibility with existing code.
 
-#### McpBridge.test.ts (13 tests)
+#### McpBridge.test.ts (27 tests)
 - ✅ Initialization (connected and disconnected modes)
 - ✅ Server creation with custom info
 - ✅ Tool caching and refresh
@@ -97,10 +103,31 @@ Created comprehensive mock implementations in `src/__tests__/helpers/`:
 - ✅ Error handling in callbacks
 - ✅ Connection state management
 - ✅ Handler registration
+- ✅ **Notification Handling** (14 tests):
+  - onStreamDeckNotification callback registration
+  - Non-tools/changed notification forwarding
+  - tools/changed notification handling (triggers tool refresh)
+  - Multiple callbacks support
+  - Error isolation between callbacks
+  - Callback unregistration
+
+#### http-session-timeout.test.ts (6 tests)
+- ✅ Session timeout after idle period
+- ✅ Multiple session cleanup
+- ✅ Custom timeout configuration
+- ✅ Session activity tracking
+
+#### http-server-startup.test.ts (4 tests)
+- ✅ EADDRINUSE error handling
+- ✅ EACCES error handling
+- ✅ EADDRNOTAVAIL error handling
+- ✅ Generic error handling
 
 ### 4. Integration Tests ✅
 
-#### transports.test.ts (9 tests)
+Integration tests are located in `src/__tests__/integration/`:
+
+#### transports.test.ts
 - ✅ stdio transport initialization
 - ✅ HTTP transport with multiple sessions
 - ✅ Session notification on tools change
@@ -111,7 +138,7 @@ Created comprehensive mock implementations in `src/__tests__/helpers/`:
 - ✅ Reconnection handling
 - ✅ Callback notifications on reconnection
 
-#### mcp-protocol.test.ts (13 tests)
+#### mcp-protocol.test.ts
 - ✅ tools/list endpoint (cached tools, empty tools, refresh)
 - ✅ tools/call endpoint (success, errors, disconnected state)
 - ✅ Tool not found error
@@ -132,10 +159,9 @@ Added to `package.json`:
 
 ## Test Coverage Summary
 
-Total test count: **93 tests** across 6 test files
+Total test count: **120 tests** across 6 test files
 
-- Unit tests: 65 tests
-- Integration tests: 28 tests
+- Unit tests: 120 tests (all tests are now in the unit test suite)
 
 Coverage areas:
 - ✅ Socket path generation (cross-platform)
@@ -149,6 +175,9 @@ Coverage areas:
 - ✅ MCP protocol endpoints
 - ✅ Reconnection scenarios
 - ✅ Notification system
+- ✅ **Notification handling** (type guards, multiple callbacks, error isolation)
+- ✅ **HTTP session management** (timeouts, cleanup)
+- ✅ **HTTP server startup errors** (EADDRINUSE, EACCES, EADDRNOTAVAIL)
 
 ## Key Features
 
@@ -186,7 +215,9 @@ src/__tests__/
 │   ├── constants.test.ts
 │   ├── utils.test.ts
 │   ├── StreamDeckClient.test.ts
-│   └── McpBridge.test.ts
+│   ├── McpBridge.test.ts
+│   ├── http-session-timeout.test.ts
+│   └── http-server-startup.test.ts
 └── integration/
     ├── transports.test.ts
     └── mcp-protocol.test.ts
@@ -204,13 +235,13 @@ The test suite provides comprehensive coverage of the Stream Deck MCP Bridge pro
 ```
 ✅ Build: Passing (no TypeScript errors)
 ✅ Test Suites: 6 of 6 passing (100%)
-✅ Tests: 93 of 93 passing (100%)
+✅ Tests: 120 of 120 passing (100%)
 ✅ Skipped: 0 tests
 
 Test Suites: 6 passed, 6 total
-Tests:       93 passed, 93 total
+Tests:       120 passed, 120 total
 Snapshots:   0 total
-Time:        ~2.3s
+Time:        ~2.4s
 ```
 
 **All tests pass successfully!** The StreamDeckClient was refactored to support dependency injection, enabling full unit test coverage while maintaining complete backward compatibility with existing production code.

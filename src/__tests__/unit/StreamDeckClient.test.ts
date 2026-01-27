@@ -700,5 +700,221 @@ describe("StreamDeckClient", () => {
 			expect(mockServer.isListening()).toBe(false);
 		});
 	});
+
+	describe("notification handling", () => {
+		beforeEach(async () => {
+			const connectPromise = client.connect(100);
+			mockSocket.simulateConnect();
+			await connectPromise;
+		});
+
+		describe("type guards", () => {
+			it("should distinguish notifications from IPC responses (notification has method but no id)", async () => {
+				const notificationCallback = jest.fn();
+				client.onNotification(notificationCallback);
+
+				// Send a notification (has method but no id)
+				const notification = { method: "tools/changed", params: { foo: "bar" } };
+				mockSocket.simulateData(JSON.stringify(notification) + "\n");
+
+				await wait(10);
+
+				// Notification callback should be called
+				expect(notificationCallback).toHaveBeenCalledWith("tools/changed", { foo: "bar" });
+			});
+
+			it("should not treat IPC response as notification (response has id)", async () => {
+				const notificationCallback = jest.fn();
+				client.onNotification(notificationCallback);
+
+				// Send a request and its response
+				const requestPromise = client.getTools();
+
+				const written = mockSocket.getWrittenData();
+				const req = JSON.parse(written[0] ?? "{}");
+
+				// Send response with id - this should NOT trigger notification callback
+				mockSocket.simulateData(JSON.stringify({ id: req.id, result: { tools: [] } }) + "\n");
+
+				await requestPromise;
+
+				// Notification callback should NOT be called for responses
+				expect(notificationCallback).not.toHaveBeenCalled();
+			});
+
+			it("should handle notification without params", async () => {
+				const notificationCallback = jest.fn();
+				client.onNotification(notificationCallback);
+
+				// Send a notification without params
+				const notification = { method: "custom/event" };
+				mockSocket.simulateData(JSON.stringify(notification) + "\n");
+
+				await wait(10);
+
+				expect(notificationCallback).toHaveBeenCalledWith("custom/event", undefined);
+			});
+		});
+
+		describe("multiple callbacks", () => {
+			it("should invoke all registered callbacks when notification is received", async () => {
+				const callback1 = jest.fn();
+				const callback2 = jest.fn();
+				const callback3 = jest.fn();
+
+				client.onNotification(callback1);
+				client.onNotification(callback2);
+				client.onNotification(callback3);
+
+				const notification = { method: "test/notification", params: { data: 123 } };
+				mockSocket.simulateData(JSON.stringify(notification) + "\n");
+
+				await wait(10);
+
+				expect(callback1).toHaveBeenCalledWith("test/notification", { data: 123 });
+				expect(callback2).toHaveBeenCalledWith("test/notification", { data: 123 });
+				expect(callback3).toHaveBeenCalledWith("test/notification", { data: 123 });
+			});
+
+			it("should invoke callbacks with correct arguments for each notification", async () => {
+				const callback = jest.fn();
+				client.onNotification(callback);
+
+				// Send multiple notifications
+				mockSocket.simulateData(JSON.stringify({ method: "event1", params: { a: 1 } }) + "\n");
+				mockSocket.simulateData(JSON.stringify({ method: "event2", params: { b: 2 } }) + "\n");
+
+				await wait(10);
+
+				expect(callback).toHaveBeenCalledTimes(2);
+				expect(callback).toHaveBeenNthCalledWith(1, "event1", { a: 1 });
+				expect(callback).toHaveBeenNthCalledWith(2, "event2", { b: 2 });
+			});
+		});
+
+		describe("error isolation", () => {
+			it("should catch and log errors from throwing callbacks", async () => {
+				const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+				const errorCallback = jest.fn(() => {
+					throw new Error("Callback failed");
+				});
+				client.onNotification(errorCallback);
+
+				const notification = { method: "test/error" };
+				mockSocket.simulateData(JSON.stringify(notification) + "\n");
+
+				await wait(10);
+
+				expect(errorCallback).toHaveBeenCalled();
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"[MCP Bridge] Notification callback error:",
+					expect.any(Error)
+				);
+
+				consoleErrorSpy.mockRestore();
+			});
+
+			it("should continue invoking remaining callbacks after one throws", async () => {
+				const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+				const callback1 = jest.fn(() => {
+					throw new Error("First callback failed");
+				});
+				const callback2 = jest.fn();
+				const callback3 = jest.fn(() => {
+					throw new Error("Third callback failed");
+				});
+				const callback4 = jest.fn();
+
+				client.onNotification(callback1);
+				client.onNotification(callback2);
+				client.onNotification(callback3);
+				client.onNotification(callback4);
+
+				const notification = { method: "test/resilience" };
+				mockSocket.simulateData(JSON.stringify(notification) + "\n");
+
+				await wait(10);
+
+				// All callbacks should be invoked despite errors
+				expect(callback1).toHaveBeenCalled();
+				expect(callback2).toHaveBeenCalled();
+				expect(callback3).toHaveBeenCalled();
+				expect(callback4).toHaveBeenCalled();
+
+				// Two errors should be logged
+				expect(consoleErrorSpy).toHaveBeenCalledTimes(2);
+
+				consoleErrorSpy.mockRestore();
+			});
+		});
+
+		describe("message stream parsing", () => {
+			it("should handle notifications mixed with IPC responses in the stream", async () => {
+				const notificationCallback = jest.fn();
+				client.onNotification(notificationCallback);
+
+				// Start a request
+				const requestPromise = client.getTools();
+				const written = mockSocket.getWrittenData();
+				const req = JSON.parse(written[0] ?? "{}");
+
+				// Send notification, then response, then another notification in one chunk
+				const notification1 = { method: "event/before" };
+				const response = { id: req.id, result: { tools: [] } };
+				const notification2 = { method: "event/after", params: { seq: 2 } };
+
+				mockSocket.simulateData(
+					JSON.stringify(notification1) + "\n" +
+					JSON.stringify(response) + "\n" +
+					JSON.stringify(notification2) + "\n"
+				);
+
+				const result = await requestPromise;
+
+				// Response should be processed correctly
+				expect(result).toEqual([]);
+
+				// Both notifications should be processed
+				await wait(10);
+				expect(notificationCallback).toHaveBeenCalledTimes(2);
+				expect(notificationCallback).toHaveBeenCalledWith("event/before", undefined);
+				expect(notificationCallback).toHaveBeenCalledWith("event/after", { seq: 2 });
+			});
+
+			it("should handle partial notification messages across chunks", async () => {
+				const notificationCallback = jest.fn();
+				client.onNotification(notificationCallback);
+
+				const notification = { method: "partial/test", params: { complete: true } };
+				const message = JSON.stringify(notification) + "\n";
+
+				// Send message in parts
+				mockSocket.simulateData(message.slice(0, 15));
+				await wait(5);
+				mockSocket.simulateData(message.slice(15));
+
+				await wait(10);
+
+				expect(notificationCallback).toHaveBeenCalledWith("partial/test", { complete: true });
+			});
+
+			it("should ignore non-object parsed messages", async () => {
+				const notificationCallback = jest.fn();
+				client.onNotification(notificationCallback);
+
+				// Send a non-object JSON value
+				mockSocket.simulateData('"just a string"\n');
+				mockSocket.simulateData("123\n");
+				mockSocket.simulateData("null\n");
+
+				await wait(10);
+
+				// None of these should trigger the notification callback
+				expect(notificationCallback).not.toHaveBeenCalled();
+			});
+		});
+	});
 });
 

@@ -10,6 +10,7 @@ const TEST_TIMEOUT_MS = 100;
 class MockMcpBridge {
 	public initialize = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
 	public onToolsChanged = jest.fn();
+	public onStreamDeckNotification = jest.fn();
 	public close = jest.fn();
 }
 
@@ -73,6 +74,7 @@ describe("HTTP server startup error handling", () => {
 		}));
 		jest.unstable_mockModule("../../McpBridge.js", () => ({
 			McpBridge: MockMcpBridge,
+			createInitializedBridge: jest.fn<() => Promise<MockMcpBridge>>().mockResolvedValue(new MockMcpBridge()),
 		}));
 		jest.unstable_mockModule("express", () => ({
 			default: Object.assign(jest.fn(() => mockExpressApp), {

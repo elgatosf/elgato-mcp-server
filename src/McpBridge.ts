@@ -22,6 +22,7 @@ import { convertToMcpTools, log } from "./utils.js";
 export class McpBridge {
 	private cachedTools: Tool[] = [];
 	private client: StreamDeckClient;
+	private notificationForwardCallbacks: Array<(method: string, params?: unknown) => Promise<void>> = [];
 	private notifyCallbacks: Array<() => Promise<void>> = [];
 	private serverInfo: ServerInfo = DEFAULT_SERVER_INFO;
 
@@ -92,11 +93,46 @@ export class McpBridge {
 	}
 
 	/**
+	 * Registers a callback to be invoked when a notification from Stream Deck needs to be forwarded.
+	 * This allows MCP clients to receive custom notifications from Stream Deck.
+	 * @param callback - Async callback function receiving the method name and optional params.
+	 */
+	public onStreamDeckNotification(callback: (method: string, params?: unknown) => Promise<void>): void {
+		this.notificationForwardCallbacks.push(callback);
+	}
+
+	/**
 	 * Registers a callback to be invoked when tools change.
 	 * @param callback - Async callback function.
 	 */
 	public onToolsChanged(callback: () => Promise<void>): void {
 		this.notifyCallbacks.push(callback);
+	}
+
+	private async forwardNotification(method: string, params?: unknown): Promise<void> {
+		for (const callback of this.notificationForwardCallbacks) {
+			try {
+				await callback(method, params);
+			} catch (error) {
+				log("Failed to forward notification:", error);
+			}
+		}
+	}
+
+	private async handleStreamDeckNotification(method: string, params?: unknown): Promise<void> {
+		log(`Received notification from Stream Deck: ${method}`, params);
+
+		switch (method) {
+			case "tools/changed":
+				// Stream Deck notified that tools have changed, refresh and notify MCP clients
+				await this.refreshTools();
+				await this.notifyToolsChanged();
+				break;
+			default:
+				// Forward all other notifications to MCP clients
+				await this.forwardNotification(method, params);
+				break;
+		}
 	}
 
 	private async notifyToolsChanged(): Promise<void> {
@@ -200,17 +236,32 @@ export class McpBridge {
 			this.cachedTools = [];
 			await this.notifyToolsChanged();
 		});
+
+		this.client.onNotification((method, params) => {
+			void this.handleStreamDeckNotification(method, params);
+		});
 	}
 }
 
 /**
+ * Creates and initializes an McpBridge instance.
+ * Use this when you need to manage transport connections manually (e.g., HTTP with multiple sessions).
+ * @returns The initialized bridge.
+ */
+export async function createInitializedBridge(): Promise<McpBridge> {
+	const bridge = new McpBridge();
+	await bridge.initialize();
+	return bridge;
+}
+
+/**
  * Creates an initialized McpBridge and connects it to a transport.
+ * Use this for single-transport scenarios (e.g., stdio).
  * @param transport - Transport to connect to.
  * @returns The connected bridge.
  */
 export async function createConnectedBridge(transport: Transport): Promise<McpBridge> {
-	const bridge = new McpBridge();
-	await bridge.initialize();
+	const bridge = await createInitializedBridge();
 
 	const mcpServer = bridge.createServer();
 	await mcpServer.connect(transport);
@@ -220,6 +271,18 @@ export async function createConnectedBridge(transport: Transport): Promise<McpBr
 			await mcpServer.sendToolListChanged();
 		} catch (error) {
 			log("Failed to send tools changed notification:", error);
+		}
+	});
+
+	bridge.onStreamDeckNotification(async (method, params) => {
+		try {
+			await mcpServer.server.notification({
+				method,
+				// Preserve original params value (undefined, null, or object) per MCP spec
+				params: params as Record<string, unknown> | undefined,
+			});
+		} catch (error) {
+			log("Failed to forward Stream Deck notification:", error);
 		}
 	});
 

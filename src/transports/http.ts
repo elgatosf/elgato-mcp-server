@@ -7,7 +7,7 @@ import express, { type Express, type Request, type Response } from "express";
 import type { Server as HttpServer } from "node:http";
 
 import { HTTP_DEFAULT_PORT, MCP_ERROR_CODES, DEFAULT_SESSION_TIMEOUT_MS, CLEANUP_INTERVAL_MS } from "../constants.js";
-import { McpBridge } from "../McpBridge.js";
+import { createInitializedBridge, McpBridge } from "../McpBridge.js";
 import { log } from "../utils.js";
 
 /** Options for configuring the HTTP transport server. */
@@ -234,8 +234,7 @@ export async function startHttpTransport(options: HttpTransportOptions = {}): Pr
 		}
 	}
 
-	const bridge = new McpBridge();
-	await bridge.initialize();
+	const bridge = await createInitializedBridge();
 
 	bridge.onToolsChanged(async () => {
 		for (const [sessionId, session] of sessions) {
@@ -243,6 +242,19 @@ export async function startHttpTransport(options: HttpTransportOptions = {}): Pr
 				await session.server.sendToolListChanged();
 			} catch (error) {
 				log(`Failed to notify session ${sessionId}:`, error);
+			}
+		}
+	});
+
+	bridge.onStreamDeckNotification(async (method, params) => {
+		for (const [sessionId, session] of sessions) {
+			try {
+				await session.server.server.notification({
+					method,
+					params: params as Record<string, unknown> | undefined,
+				});
+			} catch (error) {
+				log(`Failed to forward notification to session ${sessionId}:`, error);
 			}
 		}
 	});

@@ -122,6 +122,7 @@ export function createMockClient(
 		callTool: jest.Mock;
 		onConnected: jest.Mock;
 		onDisconnected: jest.Mock;
+		onNotification: jest.Mock;
 		startSignalListener: jest.Mock;
 	}> = {},
 ): jest.Mocked<StreamDeckClient> {
@@ -134,6 +135,7 @@ export function createMockClient(
 		callTool: jest.fn(),
 		onConnected: jest.fn(),
 		onDisconnected: jest.fn(),
+		onNotification: jest.fn(),
 		startSignalListener: jest.fn(),
 		...overrides,
 	} as unknown as jest.Mocked<StreamDeckClient>;

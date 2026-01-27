@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, jest } from "@jest/globals";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { LOG_PREFIX } from "../../constants.js";
 import { McpBridge } from "../../McpBridge.js";
 import type { StreamDeckClient } from "../../StreamDeckClient.js";
 import { createMockServerInfo, createMockTool, wait } from "../helpers/testUtils.js";
@@ -21,6 +22,7 @@ describe("McpBridge", () => {
 			callTool: jest.fn(),
 			onConnected: jest.fn(),
 			onDisconnected: jest.fn(),
+			onNotification: jest.fn(),
 			startSignalListener: jest.fn(),
 		} as any;
 
@@ -400,6 +402,219 @@ describe("McpBridge", () => {
 			// through integration tests that actually invoke the handlers
 			const disconnectedServer = bridge.createServer();
 			expect(disconnectedServer).toBeDefined();
+		});
+	});
+
+	describe("Stream Deck notification handling", () => {
+		beforeEach(async () => {
+			mockClient.connect.mockResolvedValue(true);
+			(mockClient as any).isConnected = true;
+			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
+			mockClient.getTools.mockResolvedValue([createMockTool()]);
+		});
+
+		describe("tools/changed notification", () => {
+			it("should call refreshTools and notifyToolsChanged when tools/changed notification is received", async () => {
+				await bridge.initialize();
+
+				// Track calls to getTools (proxy for refreshTools)
+				const initialGetToolsCalls = mockClient.getTools.mock.calls.length;
+
+				// Register a tools changed callback to verify notifyToolsChanged is called
+				const toolsChangedCallback = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+				bridge.onToolsChanged(toolsChangedCallback);
+
+				// Get the onNotification callback that was registered
+				const onNotificationCallback = mockClient.onNotification.mock.calls[0]?.[0];
+				expect(onNotificationCallback).toBeDefined();
+
+				// Set up fresh mock for getTools
+				mockClient.getTools.mockResolvedValue([createMockTool({ name: "new_tool" })]);
+
+				// Simulate tools/changed notification
+				if (onNotificationCallback) {
+					onNotificationCallback("tools/changed", undefined);
+				}
+
+				await wait(10);
+
+				// Verify getTools was called again (refreshTools)
+				expect(mockClient.getTools.mock.calls.length).toBeGreaterThan(initialGetToolsCalls);
+
+				// Verify toolsChangedCallback was called (notifyToolsChanged)
+				expect(toolsChangedCallback).toHaveBeenCalled();
+			});
+
+			it("should invoke all registered onToolsChanged callbacks on tools/changed notification", async () => {
+				await bridge.initialize();
+
+				const callback1 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+				const callback2 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+
+				bridge.onToolsChanged(callback1);
+				bridge.onToolsChanged(callback2);
+
+				const onNotificationCallback = mockClient.onNotification.mock.calls[0]?.[0];
+
+				if (onNotificationCallback) {
+					onNotificationCallback("tools/changed", undefined);
+				}
+
+				await wait(10);
+
+				expect(callback1).toHaveBeenCalled();
+				expect(callback2).toHaveBeenCalled();
+			});
+		});
+
+		describe("custom notification forwarding", () => {
+			it("should forward non-tools/changed notifications to onStreamDeckNotification callbacks", async () => {
+				await bridge.initialize();
+
+				const forwardCallback = jest.fn<(method: string, params?: unknown) => Promise<void>>()
+					.mockResolvedValue(undefined);
+				bridge.onStreamDeckNotification(forwardCallback);
+
+				const onNotificationCallback = mockClient.onNotification.mock.calls[0]?.[0];
+
+				if (onNotificationCallback) {
+					onNotificationCallback("custom/event", { data: "test" });
+				}
+
+				await wait(10);
+
+				expect(forwardCallback).toHaveBeenCalledWith("custom/event", { data: "test" });
+			});
+
+			it("should forward multiple custom notifications correctly", async () => {
+				await bridge.initialize();
+
+				const forwardCallback = jest.fn<(method: string, params?: unknown) => Promise<void>>()
+					.mockResolvedValue(undefined);
+				bridge.onStreamDeckNotification(forwardCallback);
+
+				const onNotificationCallback = mockClient.onNotification.mock.calls[0]?.[0];
+
+				if (onNotificationCallback) {
+					onNotificationCallback("event/one", { seq: 1 });
+					onNotificationCallback("event/two", { seq: 2 });
+				}
+
+				await wait(10);
+
+				expect(forwardCallback).toHaveBeenCalledTimes(2);
+				expect(forwardCallback).toHaveBeenCalledWith("event/one", { seq: 1 });
+				expect(forwardCallback).toHaveBeenCalledWith("event/two", { seq: 2 });
+			});
+
+			it("should not forward tools/changed to onStreamDeckNotification callbacks", async () => {
+				await bridge.initialize();
+
+				const forwardCallback = jest.fn<(method: string, params?: unknown) => Promise<void>>()
+					.mockResolvedValue(undefined);
+				bridge.onStreamDeckNotification(forwardCallback);
+
+				const onNotificationCallback = mockClient.onNotification.mock.calls[0]?.[0];
+
+				if (onNotificationCallback) {
+					onNotificationCallback("tools/changed", undefined);
+				}
+
+				await wait(10);
+
+				// tools/changed should be handled internally, not forwarded
+				expect(forwardCallback).not.toHaveBeenCalled();
+			});
+		});
+
+		describe("forward error handling", () => {
+			let consoleErrorSpy: jest.SpiedFunction<typeof console.error>;
+
+			beforeEach(() => {
+				consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+			});
+
+			afterEach(() => {
+				consoleErrorSpy.mockRestore();
+			});
+
+			it("should catch and log errors from forward callbacks", async () => {
+				await bridge.initialize();
+
+				const errorCallback = jest.fn<(method: string, params?: unknown) => Promise<void>>()
+					.mockRejectedValue(new Error("Forward failed"));
+				bridge.onStreamDeckNotification(errorCallback);
+
+				const onNotificationCallback = mockClient.onNotification.mock.calls[0]?.[0];
+
+				if (onNotificationCallback) {
+					onNotificationCallback("custom/error", undefined);
+				}
+
+				await wait(10);
+
+				expect(errorCallback).toHaveBeenCalled();
+				// The error should be logged with LOG_PREFIX and "Failed to forward notification:" message
+				// The log() function calls console.error(LOG_PREFIX, ...args)
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					LOG_PREFIX,
+					"Failed to forward notification:",
+					expect.any(Error)
+				);
+			});
+
+			it("should continue invoking remaining forward callbacks after one throws", async () => {
+				await bridge.initialize();
+
+				const errorCallback = jest.fn<(method: string, params?: unknown) => Promise<void>>()
+					.mockRejectedValue(new Error("First forward failed"));
+				const successCallback = jest.fn<(method: string, params?: unknown) => Promise<void>>()
+					.mockResolvedValue(undefined);
+
+				bridge.onStreamDeckNotification(errorCallback);
+				bridge.onStreamDeckNotification(successCallback);
+
+				const onNotificationCallback = mockClient.onNotification.mock.calls[0]?.[0];
+
+				if (onNotificationCallback) {
+					onNotificationCallback("custom/resilience", { test: true });
+				}
+
+				await wait(10);
+
+				// Both callbacks should be invoked despite the error
+				expect(errorCallback).toHaveBeenCalledWith("custom/resilience", { test: true });
+				expect(successCallback).toHaveBeenCalledWith("custom/resilience", { test: true });
+			});
+		});
+
+		describe("multiple forward callbacks", () => {
+			it("should invoke all registered onStreamDeckNotification callbacks", async () => {
+				await bridge.initialize();
+
+				const callback1 = jest.fn<(method: string, params?: unknown) => Promise<void>>()
+					.mockResolvedValue(undefined);
+				const callback2 = jest.fn<(method: string, params?: unknown) => Promise<void>>()
+					.mockResolvedValue(undefined);
+				const callback3 = jest.fn<(method: string, params?: unknown) => Promise<void>>()
+					.mockResolvedValue(undefined);
+
+				bridge.onStreamDeckNotification(callback1);
+				bridge.onStreamDeckNotification(callback2);
+				bridge.onStreamDeckNotification(callback3);
+
+				const onNotificationCallback = mockClient.onNotification.mock.calls[0]?.[0];
+
+				if (onNotificationCallback) {
+					onNotificationCallback("test/multicast", { value: 42 });
+				}
+
+				await wait(10);
+
+				expect(callback1).toHaveBeenCalledWith("test/multicast", { value: 42 });
+				expect(callback2).toHaveBeenCalledWith("test/multicast", { value: 42 });
+				expect(callback3).toHaveBeenCalledWith("test/multicast", { value: 42 });
+			});
 		});
 	});
 });

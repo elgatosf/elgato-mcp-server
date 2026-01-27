@@ -19,6 +19,7 @@ MCP Client <--MCP Transport--> Bridge <--Unix Socket/Named Pipe--> Stream Deck
 - 🌐 **ngrok Integration** — Optional public tunnel for remote access
 - 🔄 **Hot Reconnection** — Automatically reconnects when Stream Deck becomes available
 - 💻 **Cross-Platform** — Supports Windows and macOS
+- 📢 **Notification Forwarding** — Forwards Stream Deck notifications to connected clients
 
 ## Installation
 
@@ -141,8 +142,10 @@ The project includes comprehensive unit and integration tests. For detailed info
 
 The bridge consists of three main components:
 
-1. **StreamDeckClient** — IPC client for communicating with Stream Deck via Unix socket (macOS/Linux) or named pipe (Windows)
-2. **McpBridge** — Protocol translator between MCP and Stream Deck IPC
+1. **StreamDeckClient** — IPC client for communicating with Stream Deck via Unix socket (macOS/Linux) or named pipe (Windows). Handles connection lifecycle, message parsing, and notification forwarding.
+2. **McpBridge** — Protocol translator between MCP and Stream Deck IPC. Provides two initialization patterns:
+   - `createInitializedBridge()` — For manual transport management (HTTP with multiple sessions)
+   - `createConnectedBridge()` — For single transport scenarios (stdio)
 3. **Transport Layer** — stdio or HTTP transport for MCP client communication
 
 For detailed technical information, see [TECHNICAL_SPECIFICATION.md](./TECHNICAL_SPECIFICATION.md).

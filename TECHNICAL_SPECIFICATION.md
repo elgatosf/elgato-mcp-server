@@ -81,7 +81,7 @@ The system consists of three main source files:
 - Manage transport layer (stdio or HTTP)
 - Coordinate graceful shutdown
 
-#### 3.1.2 Stream Deck Client (`src/stream-deck-client.ts`)
+#### 3.1.2 Stream Deck Client (`src/StreamDeckClient.ts`)
 
 **Responsibilities:**
 - Establish and maintain IPC connection to Stream Deck
@@ -89,16 +89,44 @@ The system consists of three main source files:
 - Handle automatic reconnection via signal socket
 - Manage request timeouts and pending request tracking
 
-#### 3.1.3 Socket Path Utility (`src/socket-path.ts`)
+#### 3.1.3 MCP Bridge (`src/McpBridge.ts`)
+
+**Responsibilities:**
+- Create and configure MCP server instances
+- Handle tool discovery and caching from Stream Deck
+- Manage tool list change notifications
+- Forward Stream Deck notifications to registered callbacks
+
+#### 3.1.4 Constants (`src/constants.ts`)
 
 **Responsibilities:**
 - Provide platform-specific socket paths
 - Abstract platform differences (Unix sockets vs Windows Named Pipes)
+- Define shared constants (timeouts, buffer sizes, log prefix)
 
-**Key Functions:**
-- `getSocketPath()`: Main IPC socket path
-- `getSignalSocketPath()`: Signal notification socket path
-- `getSocketDescription()`: Human-readable path descriptions
+**Key Exports:**
+- `SOCKET_PATH`: Main IPC socket path
+- `SIGNAL_SOCKET_PATH`: Signal notification socket path
+- `REQUEST_TIMEOUT`: Request timeout in milliseconds
+- `MAX_BUFFER_SIZE`: Maximum buffer size for IPC messages
+
+#### 3.1.5 Transport Layers (`src/transports/`)
+
+**Files:**
+- `src/transports/stdio.ts`: stdio transport for Claude Desktop integration
+- `src/transports/http.ts`: HTTP transport for web-based clients
+
+#### 3.1.6 Utilities (`src/utils.ts`)
+
+**Responsibilities:**
+- Provide logging utilities with consistent prefix
+- Common helper functions
+
+#### 3.1.7 Type Definitions (`src/types.ts`)
+
+**Responsibilities:**
+- Define TypeScript interfaces for IPC protocol
+- Define request/response types for Stream Deck communication
 
 ### 3.2 Data Flow
 
@@ -189,6 +217,11 @@ Forwards tool invocation to Stream Deck and returns the result.
 #### Notifications
 
 - `notifications/tools/list_changed`: Sent when Stream Deck connects/reconnects and tools are re-discovered
+- Custom notifications: Non-standard notifications from Stream Deck are forwarded to registered callbacks via `onStreamDeckNotification()`
+
+**Notification vs Response Distinction:**
+- **Notifications**: Have a `method` field but no `id` field
+- **Responses**: Have an `id` field that correlates with the request ID
 
 ### 4.2 Stream Deck IPC Protocol (Internal)
 
@@ -350,6 +383,7 @@ await server.connect(transport);
 - Session-based: each session gets its own MCP server instance
 - Endpoints: `POST /mcp`, `GET /mcp` (SSE), `DELETE /mcp`, `GET /health`
 - Optional ngrok tunnel integration
+- Uses `createInitializedBridge()` for manual transport management
 
 ```typescript
 const transport = new StreamableHTTPServerTransport({
@@ -357,6 +391,24 @@ const transport = new StreamableHTTPServerTransport({
   onsessioninitialized: (id) => { /* track session */ },
   onsessionclosed: (id) => { /* cleanup session */ },
 });
+```
+
+**Bridge Initialization Patterns:**
+
+The McpBridge provides two initialization patterns for different use cases:
+
+1. **`createInitializedBridge()`** - Creates and initializes a bridge without connecting to a transport. Use this when you need to manage transport connections manually (e.g., HTTP with multiple sessions).
+
+```typescript
+const bridge = await createInitializedBridge();
+// Manually connect to transports as needed
+```
+
+2. **`createConnectedBridge(transport)`** - Creates, initializes, and connects a bridge to a single transport. Use this for simple scenarios like stdio where there's a single client connection.
+
+```typescript
+const transport = new StdioServerTransport();
+const bridge = await createConnectedBridge(transport);
 ```
 
 ### 5.2 Connection Management and Resilience
@@ -409,6 +461,23 @@ streamDeckClient.onConnected(async () => {
   await mcpServer.sendToolListChanged();
 });
 ```
+
+#### 5.2.4 Notification Callback System
+
+The bridge supports forwarding notifications from Stream Deck to registered callbacks:
+
+```typescript
+// Register callback for Stream Deck notifications
+bridge.onStreamDeckNotification((method, params) => {
+  console.log(`Received notification: ${method}`, params);
+});
+```
+
+**Notification Handling:**
+- The `tools/changed` notification is handled specially - it triggers a tool refresh and invokes `onToolsChanged` callbacks
+- All other notifications are forwarded to callbacks registered via `onStreamDeckNotification()`
+- Multiple callbacks can be registered; errors in one callback don't affect others
+- Callbacks are invoked in registration order
 
 ### 5.3 Error Handling and Recovery
 
@@ -513,9 +582,15 @@ switch (process.platform) {
 ```
 streamdeck-mcp/
 ├── src/
-│   ├── index.ts              # Main entry point, MCP server, transports
-│   ├── stream-deck-client.ts # Stream Deck IPC client
-│   └── socket-path.ts        # Platform-specific socket paths
+│   ├── index.ts              # Main entry point
+│   ├── McpBridge.ts          # MCP server and tool management
+│   ├── StreamDeckClient.ts   # Stream Deck IPC client
+│   ├── constants.ts          # Platform-specific paths and constants
+│   ├── types.ts              # TypeScript type definitions
+│   ├── utils.ts              # Logging and utility functions
+│   └── transports/
+│       ├── stdio.ts          # stdio transport implementation
+│       └── http.ts           # HTTP transport implementation
 ├── bin/                      # Compiled JavaScript output
 ├── package.json
 ├── tsconfig.json
@@ -607,6 +682,12 @@ pnpm lint:fix       # Prettier formatting
    - Test ID matching and timeout handling
    - Test error response handling
 
+5. **Notification Handling**
+   - Test type guards (`isNotification()` vs `isIpcResponse()`)
+   - Test multiple callback support
+   - Test error isolation between callbacks
+   - Test message stream parsing with mixed notifications and responses
+
 ### 8.2 Integration Testing Requirements
 
 **Connection Scenarios:**
@@ -653,8 +734,13 @@ The package is published as `@elgato/streamdeck-mcp` to npm registry.
 
 **Published Files:**
 - `bin/index.js` - Main entry point
-- `bin/stream-deck-client.js` - IPC client
-- `bin/socket-path.js` - Path utilities
+- `bin/McpBridge.js` - MCP server and tool management
+- `bin/StreamDeckClient.js` - IPC client
+- `bin/constants.js` - Platform-specific paths and constants
+- `bin/types.js` - TypeScript type definitions
+- `bin/utils.js` - Logging and utility functions
+- `bin/transports/stdio.js` - stdio transport implementation
+- `bin/transports/http.js` - HTTP transport implementation
 
 ### 9.2 Installation
 

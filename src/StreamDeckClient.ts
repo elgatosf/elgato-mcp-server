@@ -15,6 +15,8 @@ import type {
 	CallToolResponse,
 	IpcResponse,
 	McpTool,
+	Notification,
+	NotificationCallback,
 	PendingRequest,
 	ServerInfo,
 	ServerInfoRequest,
@@ -38,6 +40,7 @@ export type ServerFactory = (connectionListener?: (socket: net.Socket) => void) 
  */
 export class StreamDeckClient {
 	private buffer = "";
+	private notificationCallbacks: NotificationCallback[] = [];
 	private onConnectedCallback: (() => void) | null = null;
 	private onDisconnectedCallback: (() => void) | null = null;
 	private pendingRequests = new Map<string, PendingRequest>();
@@ -174,6 +177,15 @@ export class StreamDeckClient {
 	}
 
 	/**
+	 * Registers a callback to be invoked when a notification is received from Stream Deck.
+	 * Multiple callbacks can be registered.
+	 * @param callback - Callback function that receives the method name and optional params.
+	 */
+	public onNotification(callback: NotificationCallback): void {
+		this.notificationCallbacks.push(callback);
+	}
+
+	/**
 	 * Starts listening for ready signals from Stream Deck.
 	 * Attempts to create a signal server for instant notifications.
 	 * Falls back to polling only if the signal server cannot be created.
@@ -229,10 +241,40 @@ export class StreamDeckClient {
 		console.error(`${LOG_PREFIX} Socket error:`, error.message);
 	}
 
+	/**
+	 * Handles a notification by invoking all registered callbacks.
+	 * Each callback is wrapped in try-catch for error isolation.
+	 * @param notification - The notification received from Stream Deck.
+	 */
+	private handleNotification(notification: Notification): void {
+		for (const callback of this.notificationCallbacks) {
+			try {
+				callback(notification.method, notification.params);
+			} catch (callbackError) {
+				console.error(`${LOG_PREFIX} Notification callback error:`, callbackError);
+			}
+		}
+	}
+
 	private async handleReadySignal(): Promise<void> {
 		const connected = await this.connect();
 		if (connected && this.onConnectedCallback) {
 			this.onConnectedCallback();
+		}
+	}
+
+	/**
+	 * Handles an IPC response by matching it to a pending request.
+	 * Clears the timeout, removes from pending requests, and resolves the promise.
+	 * @param response - The IPC response to handle.
+	 */
+	private handleResponse(response: IpcResponse): void {
+		const pending = this.pendingRequests.get(response.id);
+
+		if (pending) {
+			clearTimeout(pending.timeout);
+			this.pendingRequests.delete(response.id);
+			pending.resolve(response);
 		}
 	}
 
@@ -265,6 +307,27 @@ export class StreamDeckClient {
 				this.startSignalListener();
 			}
 		});
+	}
+
+	/**
+	 * Type guard to check if an object is an IPC response.
+	 * A response has an `id` field of type string.
+	 * @param obj - The object to check.
+	 * @returns True if the object is an IPC response.
+	 */
+	private isIpcResponse(obj: object): obj is IpcResponse {
+		return "id" in obj && typeof (obj as Record<string, unknown>).id === "string";
+	}
+
+	/**
+	 * Type guard to check if an object is a notification.
+	 * A notification has a `method` field of type string but no `id` field.
+	 * @param obj - The object to check.
+	 * @returns True if the object is a notification.
+	 */
+	private isNotification(obj: object): obj is Notification {
+		const record = obj as Record<string, unknown>;
+		return "method" in obj && typeof record.method === "string" && !("id" in obj);
 	}
 
 	/**
@@ -301,15 +364,24 @@ export class StreamDeckClient {
 		});
 	}
 
+	/**
+	 * Parses and processes an incoming IPC message.
+	 * Delegates to handleResponse() or handleNotification() based on message type.
+	 * @param message - The raw IPC message string to parse and process.
+	 */
 	private processMessage(message: string): void {
 		try {
-			const response = JSON.parse(message) as IpcResponse;
-			const pending = this.pendingRequests.get(response.id);
+			const parsed = JSON.parse(message) as unknown;
 
-			if (pending) {
-				clearTimeout(pending.timeout);
-				this.pendingRequests.delete(response.id);
-				pending.resolve(response);
+			// Type guard for objects
+			if (typeof parsed !== "object" || parsed === null) {
+				return;
+			}
+
+			if (this.isIpcResponse(parsed)) {
+				this.handleResponse(parsed);
+			} else if (this.isNotification(parsed)) {
+				this.handleNotification(parsed);
 			}
 		} catch (error) {
 			console.error(`${LOG_PREFIX} Failed to parse message:`, error);
