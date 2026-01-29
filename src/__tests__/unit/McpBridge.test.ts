@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, jest } from "@jest/globals";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { LOG_PREFIX } from "../../constants.js";
+import { LOG_PREFIX, SDK_NOTIFICATIONS } from "../../constants.js";
 import { McpBridge } from "../../McpBridge.js";
 import type { StreamDeckClient } from "../../StreamDeckClient.js";
 import { createMockServerInfo, createMockTool, wait } from "../helpers/testUtils.js";
@@ -433,7 +433,7 @@ describe("McpBridge", () => {
 
 				// Simulate tools/changed notification
 				if (onNotificationCallback) {
-					onNotificationCallback("tools/changed", undefined);
+					onNotificationCallback(SDK_NOTIFICATIONS.TOOLS_LIST_CHANGED, undefined);
 				}
 
 				await wait(10);
@@ -457,7 +457,7 @@ describe("McpBridge", () => {
 				const onNotificationCallback = mockClient.onNotification.mock.calls[0]?.[0];
 
 				if (onNotificationCallback) {
-					onNotificationCallback("tools/changed", undefined);
+					onNotificationCallback(SDK_NOTIFICATIONS.TOOLS_LIST_CHANGED, undefined);
 				}
 
 				await wait(10);
@@ -517,7 +517,7 @@ describe("McpBridge", () => {
 				const onNotificationCallback = mockClient.onNotification.mock.calls[0]?.[0];
 
 				if (onNotificationCallback) {
-					onNotificationCallback("tools/changed", undefined);
+					onNotificationCallback(SDK_NOTIFICATIONS.TOOLS_LIST_CHANGED, undefined);
 				}
 
 				await wait(10);

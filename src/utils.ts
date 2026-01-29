@@ -1,8 +1,8 @@
 import { parseArgs } from "node:util";
-import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { Resource, Tool } from "@modelcontextprotocol/sdk/types.js";
 
 import { LOG_PREFIX } from "./constants.js";
-import type { CliOptions, McpTool } from "./types.js";
+import type { CliOptions, McpResource, McpTool } from "./types.js";
 
 /**
  * Converts Stream Deck tools to MCP tool format.
@@ -19,6 +19,24 @@ export function convertToMcpTools(tools: McpTool[]): Tool[] {
 		},
 		annotations: tool.annotations,
 		icons: tool.icons,
+	}));
+}
+
+/**
+ * Converts Stream Deck resources to MCP resource format.
+ * @param resources - Array of McpResource definitions.
+ * @returns Array of MCP Resource definitions.
+ */
+export function convertToMcpResources(resources: McpResource[]): Resource[] {
+	return resources.map((resource) => ({
+		uri: resource.uri,
+		name: resource.name,
+		title: resource.title,
+		description: resource.description,
+		mimeType: resource.mimeType,
+		icons: resource.icons,
+		annotations: resource.annotations,
+		_meta: resource._meta,
 	}));
 }
 

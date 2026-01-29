@@ -36,9 +36,47 @@ export interface CallToolRequest extends RequestBase {
 }
 
 /**
+ * Resources list request.
+ */
+export interface ResourcesListRequest extends RequestBase {
+	method: "resources_list";
+}
+
+/**
+ * Resources read request.
+ */
+export interface ResourcesReadRequest extends RequestBase {
+	method: "resources_read";
+	uri: string;
+}
+
+/**
+ * Resources subscribe request.
+ */
+export interface ResourcesSubscribeRequest extends RequestBase {
+	method: "resources_subscribe";
+	uri: string;
+}
+
+/**
+ * Resources unsubscribe request.
+ */
+export interface ResourcesUnsubscribeRequest extends RequestBase {
+	method: "resources_unsubscribe";
+	uri: string;
+}
+
+/**
  * Union type for all IPC requests.
  */
-export type IpcRequest = CallToolRequest | ServerInfoRequest | ToolsListRequest;
+export type IpcRequest =
+	| CallToolRequest
+	| ResourcesListRequest
+	| ResourcesReadRequest
+	| ResourcesSubscribeRequest
+	| ResourcesUnsubscribeRequest
+	| ServerInfoRequest
+	| ToolsListRequest;
 
 /**
  * Error structure for MCP responses.
@@ -70,6 +108,20 @@ export interface ToolAnnotations {
 }
 
 /**
+ * The sender or recipient of messages and data in a conversation.
+ */
+export type Role = 'assistant' | 'user';
+
+/**
+ * Resource annotations providing hints about resource behavior.
+ */
+export interface Annotations {
+	audience?: Role[];
+	priority?: number;
+	lastModified?: string;
+}
+
+/**
  * Tool definition from Stream Deck.
  */
 export interface McpTool {
@@ -80,6 +132,20 @@ export interface McpTool {
 	outputSchema?: Record<string, unknown>;
 	annotations?: ToolAnnotations;
 	icons?: McpIcon[];
+	_meta?: Record<string, unknown>;
+}
+
+/**
+ * Resource definition from Stream Deck.
+ */
+export interface McpResource {
+	uri: string;
+	name: string;
+	title?: string;
+	description?: string;
+	mimeType?: string;
+	icons?: McpIcon[];
+	annotations?: Annotations;
 	_meta?: Record<string, unknown>;
 }
 
@@ -139,9 +205,55 @@ export interface CallToolResponse extends ResponseBase {
 }
 
 /**
+ * Resources list result.
+ */
+export interface ResourcesListResult {
+	resources: McpResource[];
+}
+
+/**
+ * Resources list response.
+ */
+export interface ResourcesListResponse extends ResponseBase {
+	result?: ResourcesListResult;
+}
+
+/**
+ * Resources read result from Stream Deck.
+ * Note: Stream Deck returns a single resource with `content` (object),
+ * which must be converted to MCP's `contents` array format.
+ */
+export interface ResourcesReadResult {
+	uri: string;
+	mimeType: string;
+	content: unknown;
+}
+
+/**
+ * Resources read response.
+ */
+export interface ResourcesReadResponse extends ResponseBase {
+	result?: ResourcesReadResult;
+}
+
+/**
+ * Resources subscribe/unsubscribe response (empty result on success).
+ */
+export interface ResourcesSubscribeResponse extends ResponseBase {
+	result?: Record<string, never>;
+}
+
+/**
  * Union type for all IPC responses.
  */
-export type IpcResponse = CallToolResponse | ResponseBase | ServerInfoResponse | ToolsListResponse;
+export type IpcResponse =
+	| CallToolResponse
+	| ResourcesListResponse
+	| ResourcesReadResponse
+	| ResourcesSubscribeResponse
+	| ResponseBase
+	| ServerInfoResponse
+	| ToolsListResponse;
 
 /**
  * Pending request tracker for request/response correlation.

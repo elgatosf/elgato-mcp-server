@@ -14,10 +14,16 @@ import type {
 	CallToolRequest,
 	CallToolResponse,
 	IpcResponse,
+	McpResource,
 	McpTool,
 	Notification,
 	NotificationCallback,
 	PendingRequest,
+	ResourcesListRequest,
+	ResourcesListResponse,
+	ResourcesReadRequest,
+	ResourcesReadResponse,
+	ResourcesReadResult,
 	ServerInfo,
 	ServerInfoRequest,
 	ServerInfoResponse,
@@ -131,6 +137,21 @@ export class StreamDeckClient {
 	}
 
 	/**
+	 * Gets the list of available resources from Stream Deck.
+	 * @returns Array of resource definitions.
+	 */
+	public async getResources(): Promise<McpResource[]> {
+		const request: Omit<ResourcesListRequest, "id"> = { method: "resources_list" };
+		const response = await this.sendRequest<ResourcesListResponse>(request);
+
+		if (response.error) {
+			throw new Error(response.error.message);
+		}
+
+		return response.result?.resources ?? [];
+	}
+
+	/**
 	 * Gets server info from Stream Deck.
 	 * @returns Server info or null if unavailable.
 	 */
@@ -183,6 +204,26 @@ export class StreamDeckClient {
 	 */
 	public onNotification(callback: NotificationCallback): void {
 		this.notificationCallbacks.push(callback);
+	}
+
+	/**
+	 * Reads a resource by URI from Stream Deck.
+	 * @param uri - The resource URI to read.
+	 * @returns The resource read result containing contents.
+	 */
+	public async readResource(uri: string): Promise<ResourcesReadResult> {
+		const request: Omit<ResourcesReadRequest, "id"> = { method: "resources_read", uri };
+		const response = await this.sendRequest<ResourcesReadResponse>(request);
+
+		if (response.error) {
+			throw new Error(response.error.message);
+		}
+
+		if (!response.result) {
+			throw new Error("No result returned from Stream Deck");
+		}
+
+		return response.result;
 	}
 
 	/**
