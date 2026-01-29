@@ -103,12 +103,17 @@ The system consists of three main source files:
 - Provide platform-specific socket paths
 - Abstract platform differences (Unix sockets vs Windows Named Pipes)
 - Define shared constants (timeouts, buffer sizes, log prefix)
+- Define SDK notification types for Stream Deck communication
 
 **Key Exports:**
 - `SOCKET_PATH`: Main IPC socket path
 - `SIGNAL_SOCKET_PATH`: Signal notification socket path
 - `REQUEST_TIMEOUT`: Request timeout in milliseconds
 - `MAX_BUFFER_SIZE`: Maximum buffer size for IPC messages
+- `SDK_NOTIFICATIONS`: Notification type constants for Stream Deck SDK
+  - `TOOLS_LIST_CHANGED`: `"notifications/tools/list_changed"`
+  - `RESOURCES_LIST_CHANGED`: `"notifications/resources/list_changed"`
+  - `RESOURCES_UPDATED`: `"notifications/resources/updated"`
 
 #### 3.1.5 Transport Layers (`src/transports/`)
 
@@ -214,9 +219,81 @@ Forwards tool invocation to Stream Deck and returns the result.
 }
 ```
 
+#### resources/list
+Returns dynamically discovered resources from Stream Deck.
+
+**Response:**
+```json
+{
+  "resources": [
+    {
+      "uri": "streamdeck://resource/identifier",
+      "name": "resource_name",
+      "description": "Resource description",
+      "mimeType": "application/json"
+    }
+  ]
+}
+```
+
+#### resources/read
+Reads a specific resource by URI from Stream Deck.
+
+**Request:**
+```json
+{
+  "uri": "streamdeck://resource/identifier"
+}
+```
+
+**Response (Success):**
+```json
+{
+  "contents": [
+    {
+      "uri": "streamdeck://resource/identifier",
+      "mimeType": "application/json",
+      "text": "{\"key\": \"value\"}"
+    }
+  ]
+}
+```
+
+#### resources/subscribe
+Subscribes to updates for a specific resource URI.
+
+**Request:**
+```json
+{
+  "uri": "streamdeck://resource/identifier"
+}
+```
+
+**Response:**
+```json
+{}
+```
+
+#### resources/unsubscribe
+Unsubscribes from updates for a specific resource URI.
+
+**Request:**
+```json
+{
+  "uri": "streamdeck://resource/identifier"
+}
+```
+
+**Response:**
+```json
+{}
+```
+
 #### Notifications
 
 - `notifications/tools/list_changed`: Sent when Stream Deck connects/reconnects and tools are re-discovered
+- `notifications/resources/list_changed`: Sent when the list of available resources changes
+- `notifications/resources/updated`: Sent when a subscribed resource's content is updated (only forwarded if client has subscribed to the resource)
 - Custom notifications: Non-standard notifications from Stream Deck are forwarded to registered callbacks via `onStreamDeckNotification()`
 
 **Notification vs Response Distinction:**
@@ -246,6 +323,20 @@ Communication with Stream Deck uses JSON messages terminated by newline (`\n`).
   "method": "call_tool",
   "toolName": "button_press",
   "arguments": { "button_id": 5 }
+}
+```
+
+**resources_list**
+```json
+{ "id": "4", "method": "resources_list" }
+```
+
+**resources_read**
+```json
+{
+  "id": "5",
+  "method": "resources_read",
+  "uri": "streamdeck://resource/identifier"
 }
 ```
 
@@ -288,6 +379,38 @@ Communication with Stream Deck uses JSON messages terminated by newline (`\n`).
 {
   "id": "3",
   "result": { "success": true, "data": {...} }
+}
+```
+
+**ResourcesListResponse**
+```json
+{
+  "id": "4",
+  "result": {
+    "resources": [
+      {
+        "uri": "streamdeck://resource/identifier",
+        "name": "resource_name",
+        "title": "Resource Title",
+        "description": "Resource description",
+        "mimeType": "application/json",
+        "annotations": {...},
+        "icons": [...]
+      }
+    ]
+  }
+}
+```
+
+**ResourcesReadResponse**
+```json
+{
+  "id": "5",
+  "result": {
+    "uri": "streamdeck://resource/identifier",
+    "mimeType": "application/json",
+    "content": { "key": "value" }
+  }
 }
 ```
 
@@ -338,7 +461,8 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
 ```typescript
 {
   capabilities: {
-    tools: { listChanged: true }  // Enable tool list change notifications
+    tools: { listChanged: true },  // Enable tool list change notifications
+    resources: { subscribe: true, listChanged: true }  // Enable resource subscriptions and list change notifications
   }
 }
 ```
@@ -471,13 +595,28 @@ The bridge supports forwarding notifications from Stream Deck to registered call
 bridge.onStreamDeckNotification((method, params) => {
   console.log(`Received notification: ${method}`, params);
 });
+
+// Register callback for tools changed events
+bridge.onToolsChanged(async () => {
+  await mcpServer.sendToolListChanged();
+});
+
+// Register callback for resources changed events
+bridge.onResourcesChanged(async () => {
+  await mcpServer.sendResourceListChanged();
+});
 ```
 
 **Notification Handling:**
-- The `tools/changed` notification is handled specially - it triggers a tool refresh and invokes `onToolsChanged` callbacks
+- `notifications/tools/list_changed` - Triggers a tool refresh and invokes `onToolsChanged` callbacks
+- `notifications/resources/list_changed` - Triggers a resource refresh and invokes `onResourcesChanged` callbacks
+- `notifications/resources/updated` - Forwards resource update notifications only to clients that have subscribed to the specific resource URI
 - All other notifications are forwarded to callbacks registered via `onStreamDeckNotification()`
 - Multiple callbacks can be registered; errors in one callback don't affect others
 - Callbacks are invoked in registration order
+
+**Resource Subscription Tracking:**
+The bridge maintains a `resourceSubscriptions` Set to track which resource URIs each client has subscribed to. When a `resources/updated` notification is received from Stream Deck, the bridge only forwards it if the client has subscribed to that specific resource via the `resources/subscribe` endpoint.
 
 ### 5.3 Error Handling and Recovery
 
@@ -864,6 +1003,63 @@ interface ToolsListResponse extends ResponseBase {
     tools: McpTool[];
   };
 }
+
+// Resource annotations
+interface Annotations {
+  audience?: Role[];
+  priority?: number;
+}
+
+type Role = "user" | "assistant";
+
+// Resource definition
+interface McpResource {
+  uri: string;
+  name: string;
+  description?: string;
+  mimeType?: string;
+  annotations?: Annotations;
+  icons?: McpIcon[];
+  _meta?: Record<string, unknown>;
+}
+
+// Resources list request/response
+interface ResourcesListRequest extends RequestBase {
+  method: "resources_list";
+}
+
+interface ResourcesListResponse extends ResponseBase {
+  result?: {
+    resources: McpResource[];
+  };
+}
+
+// Resources read request/response
+interface ResourcesReadRequest extends RequestBase {
+  method: "resources_read";
+  uri: string;
+}
+
+interface ResourcesReadResult {
+  uri: string;
+  mimeType: string;
+  content: unknown;
+}
+
+interface ResourcesReadResponse extends ResponseBase {
+  result?: ResourcesReadResult;
+}
+
+// Resources subscribe/unsubscribe requests
+interface ResourcesSubscribeRequest extends RequestBase {
+  method: "resources_subscribe";
+  uri: string;
+}
+
+interface ResourcesUnsubscribeRequest extends RequestBase {
+  method: "resources_unsubscribe";
+  uri: string;
+}
 ```
 
 ### Configuration Types
@@ -883,9 +1079,9 @@ interface Config {
 ### Startup Sequence (Stream Deck Available)
 
 ```
-┌─────────┐     ┌─────────────┐     ┌───────────┐
-│ Bridge  │     │ StreamDeck  │     │MCP Client │
-└────┬────┘     └──────┬──────┘     └─────┬─────┘
+┌─────────┐     ┌─────────────┐      ┌───────────┐
+│ Bridge  │     │ StreamDeck  │      │MCP Client │
+└────┬────┘     └──────┬──────┘      └─────┬─────┘
      │                 │                   │
      │──connect()─────►│                   │
      │◄────connected───│                   │
