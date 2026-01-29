@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals
 import { StreamDeckClient } from "../../StreamDeckClient.js";
 import { MockServer } from "../helpers/MockServer.js";
 import { MockSocket } from "../helpers/MockSocket.js";
-import { createMockServerInfo, createMockTool, wait } from "../helpers/testUtils.js";
+import { createMockResource, createMockServerInfo, createMockTool, wait } from "../helpers/testUtils.js";
 
 describe("StreamDeckClient", () => {
 	let client: StreamDeckClient;
@@ -347,6 +347,117 @@ describe("StreamDeckClient", () => {
 			await expect(client.getServerInfo()).rejects.toThrow("Not connected to Stream Deck");
 			await expect(client.getTools()).rejects.toThrow("Not connected to Stream Deck");
 			await expect(client.callTool("test", {})).rejects.toThrow("Not connected to Stream Deck");
+		});
+
+		it("should send correct request for getResources", async () => {
+			const requestPromise = client.getResources();
+
+			const written = mockSocket.getWrittenData();
+			expect(written).toHaveLength(1);
+
+			const req = JSON.parse(written[0] ?? "{}");
+			expect(req.method).toBe("resources_list");
+			expect(req.id).toBeDefined();
+
+			// Respond
+			const resources = [createMockResource()];
+			mockSocket.simulateData(JSON.stringify({ id: req.id, result: { resources } }) + "\n");
+
+			const result = await requestPromise;
+			expect(result).toEqual(resources);
+		});
+
+		it("should handle error responses from getResources", async () => {
+			const requestPromise = client.getResources();
+
+			const written = mockSocket.getWrittenData();
+			const req = JSON.parse(written[0] ?? "{}");
+
+			mockSocket.simulateData(
+				JSON.stringify({
+					id: req.id,
+					error: { code: -1, message: "Resources error" },
+				}) + "\n",
+			);
+
+			await expect(requestPromise).rejects.toThrow("Resources error");
+		});
+
+		it("should return empty array when getResources result is undefined", async () => {
+			const requestPromise = client.getResources();
+
+			const written = mockSocket.getWrittenData();
+			const req = JSON.parse(written[0] ?? "{}");
+
+			// Send response without result
+			mockSocket.simulateData(JSON.stringify({ id: req.id }) + "\n");
+
+			const result = await requestPromise;
+			expect(result).toEqual([]);
+		});
+
+		it("should send correct request for readResource", async () => {
+			const uri = "streamdeck://test/resource";
+			const requestPromise = client.readResource(uri);
+
+			const written = mockSocket.getWrittenData();
+			expect(written).toHaveLength(1);
+
+			const req = JSON.parse(written[0] ?? "{}");
+			expect(req.method).toBe("resources_read");
+			expect(req.uri).toBe(uri);
+			expect(req.id).toBeDefined();
+
+			// Respond
+			const resourceContent = {
+				uri: uri,
+				mimeType: "application/json",
+				content: { key: "value" },
+			};
+			mockSocket.simulateData(JSON.stringify({ id: req.id, result: resourceContent }) + "\n");
+
+			const result = await requestPromise;
+			expect(result).toEqual(resourceContent);
+		});
+
+		it("should handle error responses from readResource", async () => {
+			const requestPromise = client.readResource("streamdeck://test/resource");
+
+			const written = mockSocket.getWrittenData();
+			const req = JSON.parse(written[0] ?? "{}");
+
+			mockSocket.simulateData(
+				JSON.stringify({
+					id: req.id,
+					error: { code: -1, message: "Resource not found" },
+				}) + "\n",
+			);
+
+			await expect(requestPromise).rejects.toThrow("Resource not found");
+		});
+
+		it("should throw error when readResource returns no result", async () => {
+			const requestPromise = client.readResource("streamdeck://test/resource");
+
+			const written = mockSocket.getWrittenData();
+			const req = JSON.parse(written[0] ?? "{}");
+
+			// Send response without result
+			mockSocket.simulateData(JSON.stringify({ id: req.id }) + "\n");
+
+			await expect(requestPromise).rejects.toThrow("No result returned from Stream Deck");
+		});
+
+		it("should throw error when calling getResources while disconnected", async () => {
+			client.disconnect();
+
+			await expect(client.getResources()).rejects.toThrow("Not connected to Stream Deck");
+		});
+
+		it("should throw error when calling readResource while disconnected", async () => {
+			client.disconnect();
+
+			await expect(client.readResource("streamdeck://test")).rejects.toThrow("Not connected to Stream Deck");
 		});
 	});
 

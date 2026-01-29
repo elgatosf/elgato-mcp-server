@@ -1,7 +1,7 @@
 import { describe, expect, it, jest } from "@jest/globals";
-import type { Tool } from "@modelcontextprotocol/sdk/types.js";
-import { convertToMcpTools, log, parseCliArgs, printHelp } from "../../utils.js";
-import { createMockTool } from "../helpers/testUtils.js";
+import type { Resource, Tool } from "@modelcontextprotocol/sdk/types.js";
+import { convertToMcpResources, convertToMcpTools, log, parseCliArgs, printHelp } from "../../utils.js";
+import { createMockResource, createMockTool } from "../helpers/testUtils.js";
 
 describe("utils", () => {
 	describe("convertToMcpTools", () => {
@@ -113,6 +113,95 @@ describe("utils", () => {
 				},
 				required: ["name"],
 			});
+		});
+	});
+
+	describe("convertToMcpResources", () => {
+		it("should convert basic resource with required fields", () => {
+			const mcpResource = createMockResource({
+				uri: "streamdeck://test/resource",
+				name: "test_resource",
+				description: "Test description",
+				mimeType: "application/json",
+			});
+
+			const result = convertToMcpResources([mcpResource]);
+
+			expect(result).toHaveLength(1);
+			expect(result[0]).toEqual({
+				uri: "streamdeck://test/resource",
+				name: "test_resource",
+				title: undefined,
+				description: "Test description",
+				mimeType: "application/json",
+				icons: undefined,
+				annotations: undefined,
+				_meta: undefined,
+			});
+		});
+
+		it("should preserve title, annotations and icons", () => {
+			const mcpResource = createMockResource({
+				uri: "streamdeck://annotated/resource",
+				name: "annotated_resource",
+				title: "Annotated Resource",
+				annotations: {
+					audience: ["user"],
+					priority: 1,
+				},
+				icons: [
+					{
+						src: "https://example.com/icon.png",
+						mimeType: "image/png",
+					},
+				],
+			});
+
+			const result = convertToMcpResources([mcpResource]);
+
+			expect(result[0]?.title).toBe("Annotated Resource");
+			expect(result[0]?.annotations).toEqual({
+				audience: ["user"],
+				priority: 1,
+			});
+			expect(result[0]?.icons).toEqual([
+				{
+					src: "https://example.com/icon.png",
+					mimeType: "image/png",
+				},
+			]);
+		});
+
+		it("should handle empty array", () => {
+			const result = convertToMcpResources([]);
+			expect(result).toEqual([]);
+		});
+
+		it("should convert multiple resources", () => {
+			const resources = [
+				createMockResource({ uri: "streamdeck://resource1", name: "resource1" }),
+				createMockResource({ uri: "streamdeck://resource2", name: "resource2" }),
+				createMockResource({ uri: "streamdeck://resource3", name: "resource3" }),
+			];
+
+			const result = convertToMcpResources(resources);
+
+			expect(result).toHaveLength(3);
+			expect(result[0]?.uri).toBe("streamdeck://resource1");
+			expect(result[1]?.uri).toBe("streamdeck://resource2");
+			expect(result[2]?.uri).toBe("streamdeck://resource3");
+		});
+
+		it("should preserve _meta field", () => {
+			const mcpResource = createMockResource({
+				uri: "streamdeck://meta/resource",
+				name: "meta_resource",
+				_meta: { custom: "data", version: 2 },
+			});
+
+			const result = convertToMcpResources([mcpResource]);
+
+			expect(result[0]?._meta).toEqual({ custom: "data", version: 2 });
 		});
 	});
 

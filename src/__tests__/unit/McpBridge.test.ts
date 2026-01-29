@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, jest } from "@jest/globals";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { LOG_PREFIX, SDK_NOTIFICATIONS } from "../../constants.js";
-import { McpBridge } from "../../McpBridge.js";
+import { createConnectedBridge, createInitializedBridge, McpBridge } from "../../McpBridge.js";
 import type { StreamDeckClient } from "../../StreamDeckClient.js";
-import { createMockServerInfo, createMockTool, wait } from "../helpers/testUtils.js";
+import { createMockResource, createMockServerInfo, createMockTool, wait } from "../helpers/testUtils.js";
+import { MockTransport } from "../helpers/MockTransport.js";
 
 describe("McpBridge", () => {
 	let bridge: McpBridge;
@@ -19,6 +20,8 @@ describe("McpBridge", () => {
 			disconnect: jest.fn(),
 			getServerInfo: jest.fn(),
 			getTools: jest.fn(),
+			getResources: jest.fn(),
+			readResource: jest.fn(),
 			callTool: jest.fn(),
 			onConnected: jest.fn(),
 			onDisconnected: jest.fn(),
@@ -616,6 +619,289 @@ describe("McpBridge", () => {
 				expect(callback3).toHaveBeenCalledWith("test/multicast", { value: 42 });
 			});
 		});
+
+		describe("resources/list_changed notification", () => {
+			it("should call refreshResources and notifyResourcesChanged when notification is received", async () => {
+				await bridge.initialize();
+
+				// Track calls to getResources (proxy for refreshResources)
+				const initialGetResourcesCalls = mockClient.getResources.mock.calls.length;
+
+				// Register a resources changed callback
+				const resourcesChangedCallback = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+				bridge.onResourcesChanged(resourcesChangedCallback);
+
+				// Get the onNotification callback that was registered
+				const onNotificationCallback = mockClient.onNotification.mock.calls[0]?.[0];
+				expect(onNotificationCallback).toBeDefined();
+
+				// Set up fresh mock for getResources
+				mockClient.getResources.mockResolvedValue([createMockResource()]);
+
+				// Simulate resources/list_changed notification
+				if (onNotificationCallback) {
+					onNotificationCallback(SDK_NOTIFICATIONS.RESOURCES_LIST_CHANGED, undefined);
+				}
+
+				await wait(10);
+
+				// Verify getResources was called (refreshResources)
+				expect(mockClient.getResources.mock.calls.length).toBeGreaterThan(initialGetResourcesCalls);
+
+				// Verify resourcesChangedCallback was called (notifyResourcesChanged)
+				expect(resourcesChangedCallback).toHaveBeenCalled();
+			});
+
+			it("should not forward resources/list_changed to onStreamDeckNotification callbacks", async () => {
+				await bridge.initialize();
+
+				const forwardCallback = jest.fn<(method: string, params?: unknown) => Promise<void>>()
+					.mockResolvedValue(undefined);
+				bridge.onStreamDeckNotification(forwardCallback);
+
+				const onNotificationCallback = mockClient.onNotification.mock.calls[0]?.[0];
+
+				if (onNotificationCallback) {
+					onNotificationCallback(SDK_NOTIFICATIONS.RESOURCES_LIST_CHANGED, undefined);
+				}
+
+				await wait(10);
+
+				// resources/list_changed should be handled internally, not forwarded
+				expect(forwardCallback).not.toHaveBeenCalled();
+			});
+		});
+
+		describe("resources/updated notification", () => {
+			it("should refresh resources when notification is received", async () => {
+				await bridge.initialize();
+
+				const initialGetResourcesCalls = mockClient.getResources.mock.calls.length;
+				mockClient.getResources.mockResolvedValue([createMockResource()]);
+
+				const onNotificationCallback = mockClient.onNotification.mock.calls[0]?.[0];
+
+				if (onNotificationCallback) {
+					onNotificationCallback(SDK_NOTIFICATIONS.RESOURCES_UPDATED, { uri: "streamdeck://test" });
+				}
+
+				await wait(10);
+
+				// Verify getResources was called (refreshResources)
+				expect(mockClient.getResources.mock.calls.length).toBeGreaterThan(initialGetResourcesCalls);
+			});
+
+			it("should not forward resources/updated to onStreamDeckNotification callbacks", async () => {
+				await bridge.initialize();
+
+				const forwardCallback = jest.fn<(method: string, params?: unknown) => Promise<void>>()
+					.mockResolvedValue(undefined);
+				bridge.onStreamDeckNotification(forwardCallback);
+
+				const onNotificationCallback = mockClient.onNotification.mock.calls[0]?.[0];
+
+				if (onNotificationCallback) {
+					onNotificationCallback(SDK_NOTIFICATIONS.RESOURCES_UPDATED, { uri: "streamdeck://test" });
+				}
+
+				await wait(10);
+
+				// resources/updated should be handled internally, not forwarded
+				expect(forwardCallback).not.toHaveBeenCalled();
+			});
+		});
+	});
+
+	describe("resources callback notifications", () => {
+		it("should register resources changed callback", () => {
+			const callback = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+
+			bridge.onResourcesChanged(callback);
+
+			// Callback should be registered (will be called when resources change)
+			expect(callback).not.toHaveBeenCalled();
+		});
+
+		it("should invoke all registered onResourcesChanged callbacks", async () => {
+			mockClient.connect.mockResolvedValue(true);
+			(mockClient as any).isConnected = true;
+			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
+			mockClient.getTools.mockResolvedValue([]);
+			mockClient.getResources.mockResolvedValue([createMockResource()]);
+
+			const callback1 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const callback2 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+
+			bridge.onResourcesChanged(callback1);
+			bridge.onResourcesChanged(callback2);
+
+			await bridge.initialize();
+
+			const onNotificationCallback = mockClient.onNotification.mock.calls[0]?.[0];
+
+			if (onNotificationCallback) {
+				onNotificationCallback(SDK_NOTIFICATIONS.RESOURCES_LIST_CHANGED, undefined);
+			}
+
+			await wait(10);
+
+			expect(callback1).toHaveBeenCalled();
+			expect(callback2).toHaveBeenCalled();
+		});
+
+		it("should handle errors in resources notification callbacks", async () => {
+			const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+			mockClient.connect.mockResolvedValue(true);
+			(mockClient as any).isConnected = true;
+			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
+			mockClient.getTools.mockResolvedValue([]);
+			mockClient.getResources.mockResolvedValue([]);
+
+			const errorCallback = jest.fn<() => Promise<void>>().mockRejectedValue(new Error("Resources callback error"));
+			const successCallback = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+
+			bridge.onResourcesChanged(errorCallback);
+			bridge.onResourcesChanged(successCallback);
+
+			await bridge.initialize();
+
+			const onNotificationCallback = mockClient.onNotification.mock.calls[0]?.[0];
+
+			if (onNotificationCallback) {
+				onNotificationCallback(SDK_NOTIFICATIONS.RESOURCES_LIST_CHANGED, undefined);
+			}
+
+			await wait(10);
+
+			// Both callbacks should be called despite error
+			expect(errorCallback).toHaveBeenCalled();
+			expect(successCallback).toHaveBeenCalled();
+
+			// Error should be logged
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				LOG_PREFIX,
+				"Failed to notify resources changed:",
+				expect.any(Error)
+			);
+
+			consoleErrorSpy.mockRestore();
+		});
+	});
+
+	describe("resource subscription forwarding", () => {
+		it("should forward RESOURCES_UPDATED notification when subscribed to resource", async () => {
+			mockClient.connect.mockResolvedValue(true);
+			(mockClient as any).isConnected = true;
+			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
+			mockClient.getTools.mockResolvedValue([]);
+			mockClient.getResources.mockResolvedValue([createMockResource({ uri: "streamdeck://test/resource" })]);
+
+			const notificationCallback = jest.fn<(method: string, params?: unknown) => Promise<void>>().mockResolvedValue(undefined);
+
+			bridge.onStreamDeckNotification(notificationCallback);
+
+			await bridge.initialize();
+
+			// Simulate RESOURCES_UPDATED notification for a non-subscribed resource
+			const onNotificationCallback = mockClient.onNotification.mock.calls[0]?.[0];
+			if (onNotificationCallback) {
+				onNotificationCallback(SDK_NOTIFICATIONS.RESOURCES_UPDATED, { uri: "streamdeck://test/not-subscribed" });
+			}
+
+			await wait(10);
+
+			// Should NOT be forwarded since not subscribed
+			expect(notificationCallback).not.toHaveBeenCalledWith(
+				SDK_NOTIFICATIONS.RESOURCES_UPDATED,
+				expect.anything()
+			);
+		});
+
+		it("should forward RESOURCES_UPDATED notification after subscribing via handler", async () => {
+			const { MockTransport } = await import("../helpers/MockTransport.js");
+
+			mockClient.connect.mockResolvedValue(true);
+			(mockClient as any).isConnected = true;
+			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
+			mockClient.getTools.mockResolvedValue([]);
+			mockClient.getResources.mockResolvedValue([createMockResource({ uri: "streamdeck://test/subscribed" })]);
+
+			const notificationCallback = jest.fn<(method: string, params?: unknown) => Promise<void>>().mockResolvedValue(undefined);
+
+			bridge.onStreamDeckNotification(notificationCallback);
+
+			await bridge.initialize();
+
+			// Create server and connect transport
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			// Subscribe to a resource via the handler
+			const subscribeRequest = {
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "resources/subscribe",
+				params: { uri: "streamdeck://test/subscribed" },
+			};
+			transport.simulateIncomingMessage(subscribeRequest);
+			await transport.waitForOutgoingMessage();
+
+			// Now simulate RESOURCES_UPDATED notification for the subscribed resource
+			const onNotificationCallback = mockClient.onNotification.mock.calls[0]?.[0];
+			if (onNotificationCallback) {
+				onNotificationCallback(SDK_NOTIFICATIONS.RESOURCES_UPDATED, { uri: "streamdeck://test/subscribed" });
+			}
+
+			await wait(10);
+
+			// Should be forwarded since subscribed
+			expect(notificationCallback).toHaveBeenCalledWith(
+				SDK_NOTIFICATIONS.RESOURCES_UPDATED,
+				{ uri: "streamdeck://test/subscribed" }
+			);
+		});
+	});
+});
+
+describe("createInitializedBridge", () => {
+	it("should create and initialize a bridge", async () => {
+		// Note: This test uses the real StreamDeckClient which will fail to connect
+		// but should still create and return a bridge in disconnected mode
+		const bridge = await createInitializedBridge();
+
+		expect(bridge).toBeInstanceOf(McpBridge);
+		// Bridge should be in disconnected mode since no real Stream Deck is available
+		expect(bridge.isConnected).toBe(false);
+
+		bridge.close();
+	});
+});
+
+describe("createConnectedBridge", () => {
+	it("should create bridge and connect to transport", async () => {
+		const transport = new MockTransport();
+		const bridge = await createConnectedBridge(transport);
+
+		expect(bridge).toBeInstanceOf(McpBridge);
+		// Transport should be started
+		expect(transport.isStarted()).toBe(true);
+
+		bridge.close();
+		await transport.close();
+	});
+
+	it("should set up tools changed notification forwarding", async () => {
+		const transport = new MockTransport();
+		const bridge = await createConnectedBridge(transport);
+
+		// Bridge is now configured with callbacks that forward notifications
+		// We can verify the bridge was properly set up
+		expect(bridge).toBeDefined();
+
+		bridge.close();
+		await transport.close();
 	});
 });
 

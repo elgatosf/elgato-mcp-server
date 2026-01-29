@@ -1,6 +1,6 @@
 import { jest } from "@jest/globals";
 import type { StreamDeckClient } from "../../StreamDeckClient.js";
-import type { CallToolResponse, McpTool, ServerInfo, ToolsListResponse } from "../../types.js";
+import type { CallToolResponse, McpResource, McpTool, ServerInfo, ToolsListResponse } from "../../types.js";
 
 /**
  * Creates a mock McpTool for testing.
@@ -15,6 +15,19 @@ export function createMockTool(overrides: Partial<McpTool> = {}): McpTool {
 				param1: { type: "string" },
 			},
 		},
+		...overrides,
+	};
+}
+
+/**
+ * Creates a mock McpResource for testing.
+ */
+export function createMockResource(overrides: Partial<McpResource> = {}): McpResource {
+	return {
+		uri: "streamdeck://test/resource",
+		name: "test_resource",
+		description: "A test resource",
+		mimeType: "application/json",
 		...overrides,
 	};
 }
@@ -119,6 +132,8 @@ export function createMockClient(
 		disconnect: jest.Mock;
 		getServerInfo: jest.Mock;
 		getTools: jest.Mock;
+		getResources: jest.Mock;
+		readResource: jest.Mock;
 		callTool: jest.Mock;
 		onConnected: jest.Mock;
 		onDisconnected: jest.Mock;
@@ -132,6 +147,8 @@ export function createMockClient(
 		disconnect: jest.fn(),
 		getServerInfo: jest.fn(),
 		getTools: jest.fn(),
+		getResources: jest.fn(),
+		readResource: jest.fn(),
 		callTool: jest.fn(),
 		onConnected: jest.fn(),
 		onDisconnected: jest.fn(),
