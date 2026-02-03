@@ -96,6 +96,7 @@ export class McpBridge {
 			log("Connected to Stream Deck");
 			await this.refreshServerInfo();
 			await this.refreshTools();
+			await this.refreshResources();
 		} else {
 			log("Stream Deck not available, starting in disconnected mode");
 		}
@@ -361,12 +362,15 @@ export class McpBridge {
 			await this.refreshServerInfo();
 			await this.refreshTools();
 			await this.notifyToolsChanged();
+			await this.refreshResources();
+			await this.notifyResourcesChanged();
 		});
 
 		this.client.onDisconnected(async () => {
 			log("Stream Deck disconnected, clearing tools...");
 			this.cachedTools = [];
 			await this.notifyToolsChanged();
+			await this.notifyResourcesChanged();
 		});
 
 		this.client.onNotification((method, params) => {

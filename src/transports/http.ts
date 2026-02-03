@@ -245,6 +245,16 @@ export async function startHttpTransport(options: HttpTransportOptions = {}): Pr
 			}
 		}
 	});
+	
+	bridge.onResourcesChanged(async () => {
+		for (const [sessionId, session] of sessions) {
+			try {
+				await session.server.sendResourceListChanged();
+			} catch (error) {
+				log(`Failed to notify session ${sessionId}:`, error);
+			}
+		}
+	});
 
 	bridge.onStreamDeckNotification(async (method, params) => {
 		for (const [sessionId, session] of sessions) {

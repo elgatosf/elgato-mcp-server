@@ -82,6 +82,26 @@ describe("McpBridge", () => {
 			// Should not throw
 			await expect(bridge.initialize()).resolves.not.toThrow();
 		});
+
+		it("should refresh resources during initialization when connected", async () => {
+			mockClient.connect.mockResolvedValue(true);
+			(mockClient as any).isConnected = true;
+			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
+			mockClient.getTools.mockResolvedValue([createMockTool()]);
+			mockClient.getResources.mockResolvedValue([createMockResource()]);
+
+			await bridge.initialize();
+
+			expect(mockClient.getResources).toHaveBeenCalled();
+		});
+
+		it("should not refresh resources during initialization when disconnected", async () => {
+			mockClient.connect.mockResolvedValue(false);
+
+			await bridge.initialize();
+
+			expect(mockClient.getResources).not.toHaveBeenCalled();
+		});
 	});
 
 	describe("server creation", () => {
@@ -318,6 +338,118 @@ describe("McpBridge", () => {
 			// Both callbacks should be called despite error
 			expect(errorCallback).toHaveBeenCalled();
 			expect(successCallback).toHaveBeenCalled();
+		});
+	});
+
+	describe("resources caching", () => {
+		it("should refresh resources on reconnection", async () => {
+			mockClient.connect.mockResolvedValue(true);
+			(mockClient as any).isConnected = true;
+			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
+			mockClient.getTools.mockResolvedValue([]);
+			mockClient.getResources.mockResolvedValue([]);
+
+			await bridge.initialize();
+
+			// Get the onConnected callback
+			const onConnectedCallback = mockClient.onConnected.mock.calls[0]?.[0];
+			expect(onConnectedCallback).toBeDefined();
+
+			// Reset mock to track reconnection calls
+			mockClient.getResources.mockClear();
+			mockClient.getResources.mockResolvedValue([createMockResource()]);
+
+			// Simulate reconnection
+			if (onConnectedCallback) {
+				await onConnectedCallback();
+			}
+
+			// Resources should be refreshed
+			expect(mockClient.getResources).toHaveBeenCalled();
+		});
+
+		it("should call resources changed callbacks on reconnection", async () => {
+			const callback = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+
+			bridge.onResourcesChanged(callback);
+
+			mockClient.connect.mockResolvedValue(true);
+			(mockClient as any).isConnected = true;
+			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
+			mockClient.getTools.mockResolvedValue([]);
+			mockClient.getResources.mockResolvedValue([]);
+
+			await bridge.initialize();
+
+			// Get the onConnected callback
+			const onConnectedCallback = mockClient.onConnected.mock.calls[0]?.[0];
+
+			// Simulate reconnection
+			if (onConnectedCallback) {
+				await onConnectedCallback();
+			}
+
+			await wait(10);
+
+			// Callback should be called on reconnection
+			expect(callback).toHaveBeenCalled();
+		});
+
+		it("should call resources changed callbacks on disconnection", async () => {
+			const callback = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+
+			bridge.onResourcesChanged(callback);
+
+			mockClient.connect.mockResolvedValue(true);
+			(mockClient as any).isConnected = true;
+			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
+			mockClient.getTools.mockResolvedValue([]);
+			mockClient.getResources.mockResolvedValue([]);
+
+			await bridge.initialize();
+
+			// Get the onDisconnected callback
+			const onDisconnectedCallback = mockClient.onDisconnected.mock.calls[0]?.[0];
+			expect(onDisconnectedCallback).toBeDefined();
+
+			// Simulate disconnection
+			(mockClient as any).isConnected = false;
+			if (onDisconnectedCallback) {
+				await onDisconnectedCallback();
+			}
+
+			await wait(10);
+
+			// Callback should be called on disconnection
+			expect(callback).toHaveBeenCalled();
+		});
+
+		it("should notify multiple resources callbacks on disconnection", async () => {
+			const callback1 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const callback2 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+
+			bridge.onResourcesChanged(callback1);
+			bridge.onResourcesChanged(callback2);
+
+			mockClient.connect.mockResolvedValue(true);
+			(mockClient as any).isConnected = true;
+			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
+			mockClient.getTools.mockResolvedValue([]);
+			mockClient.getResources.mockResolvedValue([]);
+
+			await bridge.initialize();
+
+			const onDisconnectedCallback = mockClient.onDisconnected.mock.calls[0]?.[0];
+
+			(mockClient as any).isConnected = false;
+			if (onDisconnectedCallback) {
+				await onDisconnectedCallback();
+			}
+
+			await wait(10);
+
+			expect(callback1).toHaveBeenCalled();
+			expect(callback2).toHaveBeenCalled();
 		});
 	});
 

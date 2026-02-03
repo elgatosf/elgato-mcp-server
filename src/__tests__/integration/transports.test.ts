@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, jest } from "@jest/globals";
 import { McpBridge } from "../../McpBridge.js";
 import type { StreamDeckClient } from "../../StreamDeckClient.js";
 import { MockSocket } from "../helpers/MockSocket.js";
-import { createMockClient, createMockServerInfo, createMockTool, wait } from "../helpers/testUtils.js";
+import { createMockClient, createMockResource, createMockServerInfo, createMockTool, wait } from "../helpers/testUtils.js";
 
 describe("Transport Integration Tests", () => {
 	let mockClient: jest.Mocked<StreamDeckClient>;
@@ -94,6 +94,36 @@ describe("Transport Integration Tests", () => {
 			// Simulate reconnection
 			const onConnectedCallback = mockClient.onConnected.mock.calls[0]?.[0];
 			(mockClient as any).isConnected = true;
+			if (onConnectedCallback) {
+				await onConnectedCallback();
+			}
+
+			await wait(10);
+
+			expect(callback1).toHaveBeenCalled();
+			expect(callback2).toHaveBeenCalled();
+
+			bridge.close();
+		});
+
+		it("should notify all sessions on resources change", async () => {
+			mockClient.connect.mockResolvedValue(true);
+			(mockClient as any).isConnected = true;
+			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
+			mockClient.getTools.mockResolvedValue([]);
+			mockClient.getResources.mockResolvedValue([createMockResource()]);
+
+			const bridge = new McpBridge(mockClient);
+			await bridge.initialize();
+
+			const callback1 = jest.fn() as any;
+			const callback2 = jest.fn() as any;
+
+			bridge.onResourcesChanged(callback1);
+			bridge.onResourcesChanged(callback2);
+
+			// Simulate reconnection
+			const onConnectedCallback = mockClient.onConnected.mock.calls[0]?.[0];
 			if (onConnectedCallback) {
 				await onConnectedCallback();
 			}
