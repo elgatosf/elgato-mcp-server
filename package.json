@@ -39,12 +39,12 @@
     },
     "homepage": "https://github.com/elgatosf/streamdeck-mcp#readme",
     "license": "MIT",
-    "packageManager": "pnpm@10.26.0",
+    "packageManager": "pnpm@10.28.2",
     "prettier": "@elgato/prettier-config",
     "dependencies": {
-        "@modelcontextprotocol/sdk": "^1.0.0",
-        "@ngrok/ngrok": "^1.6.0",
-        "cors": "^2.8.5",
+        "@modelcontextprotocol/sdk": "^1.26.0",
+        "@ngrok/ngrok": "^1.7.0",
+        "cors": "^2.8.6",
         "express": "^5.2.1"
     },
     "devDependencies": {
@@ -52,13 +52,13 @@
         "@elgato/eslint-config": "^0.3.1",
         "@elgato/prettier-config": "^0.3.3",
         "@jest/globals": "^30.2.0",
-        "@types/cors": "^2.8.5",
+        "@types/cors": "^2.8.19",
         "@types/express": "^5.0.6",
         "@types/jest": "^30.0.0",
-        "@types/node": "^25.0.3",
+        "@types/node": "^25.2.1",
         "eslint": "^9.39.2",
         "jest": "^30.2.0",
-        "prettier": "3.7.4",
+        "prettier": "3.8.1",
         "ts-jest": "^29.4.6",
         "ts-node": "^10.9.2",
         "typescript": "^5.9.3"

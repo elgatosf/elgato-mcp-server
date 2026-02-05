@@ -44,25 +44,25 @@ The bridge operates in proxy mode:
 
 #### Production Dependencies
 
-| Package | Version | Purpose |
-|---------|---------|---------|
-| `@modelcontextprotocol/sdk` | ^1.0.0 | MCP protocol implementation |
-| `@ngrok/ngrok` | ^1.6.0 | Optional HTTP tunnel for remote access |
-| `cors` | ^2.8.5 | CORS middleware for HTTP transport |
-| `express` | ^5.2.1 | HTTP server framework |
-| `zod` | ^4.2.1 | Runtime type validation |
+| Package | Purpose |
+|---------|---------|
+| `@modelcontextprotocol/sdk` | MCP protocol implementation |
+| `@ngrok/ngrok` | Optional HTTP tunnel for remote access |
+| `cors` | CORS middleware for HTTP transport |
+| `express` | HTTP server framework |
+| `zod` | Runtime type validation |
 
 #### Development Dependencies
 
-| Package | Version | Purpose |
-|---------|---------|---------|
-| `typescript` | ^5.9.3 | TypeScript compiler |
-| `@types/node` | ^25.0.3 | Node.js type definitions |
-| `@types/cors` | ^2.8.5 | CORS type definitions |
-| `@types/express` | ^5.0.6 | Express type definitions |
-| `eslint` | ^9.39.2 | Code linting |
-| `prettier` | 3.7.4 | Code formatting |
-| `@changesets/cli` | ^2.29.8 | Version management |
+| Package | Purpose |
+|---------|---------|
+| `typescript` | TypeScript compiler |
+| `@types/node` | Node.js type definitions |
+| `@types/cors` | CORS type definitions |
+| `@types/express` | Express type definitions |
+| `eslint` | Code linting |
+| `prettier` | Code formatting |
+| `@changesets/cli` | Version management |
 
 ---
 
