@@ -392,14 +392,13 @@ export class McpBridge {
 			}
 
 			try {
-				// Cast the schema - Stream Deck provides a JSON Schema object that matches MCP's expected format
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
-
 				log("Forwarding elicitation to MCP client:", params);
 
+				// Cast the schema - Stream Deck provides a JSON Schema object that matches MCP's expected format
 				const result = await this.activeMcpServer.server.elicitInput({
 					mode: params.mode,
 					message: params.message,
+					// eslint-disable-next-line @typescript-eslint/no-explicit-any
 					requestedSchema: params.requestedSchema as any,
 				});
 

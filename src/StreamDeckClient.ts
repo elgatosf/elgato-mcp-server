@@ -203,15 +203,6 @@ export class StreamDeckClient {
 	}
 
 	/**
-	 * Registers a callback to be invoked when a notification is received from Stream Deck.
-	 * Multiple callbacks can be registered.
-	 * @param callback - Callback function that receives the method name and optional params.
-	 */
-	public onNotification(callback: NotificationCallback): void {
-		this.notificationCallbacks.push(callback);
-	}
-
-	/**
 	 * Registers a callback to handle elicitation requests from Stream Deck.
 	 * Only one callback can be registered at a time.
 	 * The callback receives elicitation params and must return a response.
@@ -219,6 +210,15 @@ export class StreamDeckClient {
 	 */
 	public onElicitation(callback: ElicitationCallback): void {
 		this.elicitationCallback = callback;
+	}
+
+	/**
+	 * Registers a callback to be invoked when a notification is received from Stream Deck.
+	 * Multiple callbacks can be registered.
+	 * @param callback - Callback function that receives the method name and optional params.
+	 */
+	public onNotification(callback: NotificationCallback): void {
+		this.notificationCallbacks.push(callback);
 	}
 
 	/**
@@ -293,10 +293,6 @@ export class StreamDeckClient {
 		}
 	}
 
-	private handleError(error: Error): void {
-		console.error(`${LOG_PREFIX} Socket error:`, error.message);
-	}
-
 	/**
 	 * Handles an elicitation request from Stream Deck.
 	 * Invokes the registered callback and sends the response back to Stream Deck.
@@ -333,6 +329,10 @@ export class StreamDeckClient {
 
 		// Send response back to Stream Deck
 		this.sendElicitationResponse(id, response);
+	}
+
+	private handleError(error: Error): void {
+		console.error(`${LOG_PREFIX} Socket error:`, error.message);
 	}
 
 	/**
@@ -504,6 +504,27 @@ export class StreamDeckClient {
 		}
 	}
 
+	/**
+	 * Sends an elicitation response back to Stream Deck.
+	 * Uses the original request's id for correlation.
+	 * @param id - The id from the original elicitation request.
+	 * @param response - The elicitation response to send.
+	 */
+	private sendElicitationResponse(id: string, response: ElicitationResponse): void {
+		if (!this.socket || this.socket.destroyed) {
+			console.error(`${LOG_PREFIX} Cannot send elicitation response: not connected`);
+			return;
+		}
+
+		const ipcResponse = {
+			id,
+			method: "elicitation/response",
+			result: response,
+		};
+
+		this.socket.write(JSON.stringify(ipcResponse) + "\n");
+	}
+
 	private async sendRequest<T extends IpcResponse>(request: object): Promise<T> {
 		if (!this.socket || this.socket.destroyed) {
 			throw new Error("Not connected to Stream Deck");
@@ -526,27 +547,6 @@ export class StreamDeckClient {
 
 			this.socket!.write(JSON.stringify(fullRequest) + "\n");
 		});
-	}
-
-	/**
-	 * Sends an elicitation response back to Stream Deck.
-	 * Uses the original request's id for correlation.
-	 * @param id - The id from the original elicitation request.
-	 * @param response - The elicitation response to send.
-	 */
-	private sendElicitationResponse(id: string, response: ElicitationResponse): void {
-		if (!this.socket || this.socket.destroyed) {
-			console.error(`${LOG_PREFIX} Cannot send elicitation response: not connected`);
-			return;
-		}
-
-		const ipcResponse = {
-			id,
-			method: "elicitation/response",
-			result: response,
-		};
-
-		this.socket.write(JSON.stringify(ipcResponse) + "\n");
 	}
 
 	private setupSocketHandlers(): void {
