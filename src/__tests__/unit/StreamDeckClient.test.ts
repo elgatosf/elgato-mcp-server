@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
 import { StreamDeckClient } from "../../StreamDeckClient.js";
+import type { ElicitationCallback, ElicitationParams, ElicitationResponse } from "../../types.js";
 import { MockServer } from "../helpers/MockServer.js";
 import { MockSocket } from "../helpers/MockSocket.js";
 import { createMockResource, createMockServerInfo, createMockTool, wait } from "../helpers/testUtils.js";
@@ -1024,6 +1025,369 @@ describe("StreamDeckClient", () => {
 
 				// None of these should trigger the notification callback
 				expect(notificationCallback).not.toHaveBeenCalled();
+			});
+		});
+	});
+
+	describe("elicitation handling", () => {
+		beforeEach(async () => {
+			const connectPromise = client.connect(100);
+			mockSocket.simulateConnect();
+			await connectPromise;
+		});
+
+		describe("type guards", () => {
+			it("should identify elicitation request (has both id and method: elicitation/create)", async () => {
+				const elicitationCallback = jest.fn<ElicitationCallback>().mockResolvedValue({ action: "accept", content: { name: "test" } });
+				client.onElicitation(elicitationCallback);
+
+				// Send an elicitation request (has both id and method)
+				const elicitationRequest = {
+					id: "elicit-123",
+					method: "elicitation/create",
+					params: {
+						message: "Please provide your name",
+						mode: "form",
+						requestedSchema: {
+							type: "object",
+							properties: { name: { type: "string" } },
+						},
+					},
+				};
+				mockSocket.simulateData(JSON.stringify(elicitationRequest) + "\n");
+
+				await wait(10);
+
+				expect(elicitationCallback).toHaveBeenCalledWith({
+					message: "Please provide your name",
+					mode: "form",
+					requestedSchema: {
+						type: "object",
+						properties: { name: { type: "string" } },
+					},
+				});
+			});
+
+			it("should not treat regular IPC response as elicitation request", async () => {
+				const elicitationCallback = jest.fn<ElicitationCallback>();
+				client.onElicitation(elicitationCallback);
+
+				// Send a regular IPC response (has id but no method)
+				const requestPromise = client.getTools();
+
+				const written = mockSocket.getWrittenData();
+				const req = JSON.parse(written[0] ?? "{}");
+
+				mockSocket.simulateData(JSON.stringify({ id: req.id, result: { tools: [] } }) + "\n");
+
+				await requestPromise;
+
+				expect(elicitationCallback).not.toHaveBeenCalled();
+			});
+
+			it("should not treat notification as elicitation request", async () => {
+				const elicitationCallback = jest.fn<ElicitationCallback>();
+				client.onElicitation(elicitationCallback);
+
+				// Send a notification (has method but no id)
+				const notification = { method: "tools/changed", params: { foo: "bar" } };
+				mockSocket.simulateData(JSON.stringify(notification) + "\n");
+
+				await wait(10);
+
+				expect(elicitationCallback).not.toHaveBeenCalled();
+			});
+
+			it("should not treat message with different method as elicitation", async () => {
+				const elicitationCallback = jest.fn<ElicitationCallback>();
+				client.onElicitation(elicitationCallback);
+
+				// Send a message with id and method, but not elicitation/create
+				const otherRequest = {
+					id: "other-123",
+					method: "some/other/method",
+					params: { data: "test" },
+				};
+				mockSocket.simulateData(JSON.stringify(otherRequest) + "\n");
+
+				await wait(10);
+
+				expect(elicitationCallback).not.toHaveBeenCalled();
+			});
+		});
+
+		describe("callback registration", () => {
+			it("should register elicitation callback", () => {
+				const callback = jest.fn<ElicitationCallback>().mockResolvedValue({ action: "accept" });
+				client.onElicitation(callback);
+
+				// No error should be thrown
+				expect(callback).not.toHaveBeenCalled();
+			});
+
+			it("should replace previous elicitation callback", async () => {
+				const callback1 = jest.fn<ElicitationCallback>().mockResolvedValue({ action: "decline" });
+				const callback2 = jest.fn<ElicitationCallback>().mockResolvedValue({ action: "accept" });
+
+				client.onElicitation(callback1);
+				client.onElicitation(callback2);
+
+				const elicitationRequest = {
+					id: "elicit-456",
+					method: "elicitation/create",
+					params: {
+						message: "Test",
+						mode: "form",
+						requestedSchema: { type: "object", properties: {} },
+					},
+				};
+				mockSocket.simulateData(JSON.stringify(elicitationRequest) + "\n");
+
+				await wait(10);
+
+				// Only the second callback should be called
+				expect(callback1).not.toHaveBeenCalled();
+				expect(callback2).toHaveBeenCalled();
+			});
+		});
+
+		describe("response handling", () => {
+			it("should send elicitation response back to Stream Deck", async () => {
+				const callback = jest.fn<ElicitationCallback>().mockResolvedValue({ action: "accept", content: { name: "John" } });
+				client.onElicitation(callback);
+
+				const elicitationRequest = {
+					id: "elicit-789",
+					method: "elicitation/create",
+					params: {
+						message: "Enter name",
+						mode: "form",
+						requestedSchema: { type: "object", properties: { name: { type: "string" } } },
+					},
+				};
+				mockSocket.simulateData(JSON.stringify(elicitationRequest) + "\n");
+
+				await wait(10);
+
+				// Check that response was written to socket
+				const written = mockSocket.getWrittenData();
+				const response = written.find((w) => {
+					const parsed = JSON.parse(w);
+					return parsed.id === "elicit-789";
+				});
+
+				expect(response).toBeDefined();
+				const parsedResponse = JSON.parse(response!);
+				expect(parsedResponse.id).toBe("elicit-789");
+				expect(parsedResponse.result).toEqual({ action: "accept", content: { name: "John" } });
+			});
+
+			it("should send decline response when no callback registered", async () => {
+				// Don't register any callback
+
+				const elicitationRequest = {
+					id: "elicit-no-cb",
+					method: "elicitation/create",
+					params: {
+						message: "Enter name",
+						mode: "form",
+						requestedSchema: { type: "object", properties: {} },
+					},
+				};
+				mockSocket.simulateData(JSON.stringify(elicitationRequest) + "\n");
+
+				await wait(10);
+
+				const written = mockSocket.getWrittenData();
+				const response = written.find((w) => {
+					const parsed = JSON.parse(w);
+					return parsed.id === "elicit-no-cb";
+				});
+
+				expect(response).toBeDefined();
+				const parsedResponse = JSON.parse(response!);
+				expect(parsedResponse.result).toEqual({ action: "decline" });
+			});
+
+			it("should send decline response when callback throws error", async () => {
+				const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+				const callback = jest.fn<ElicitationCallback>().mockRejectedValue(new Error("Callback failed"));
+				client.onElicitation(callback);
+
+				const elicitationRequest = {
+					id: "elicit-error",
+					method: "elicitation/create",
+					params: {
+						message: "Enter name",
+						mode: "form",
+						requestedSchema: { type: "object", properties: {} },
+					},
+				};
+				mockSocket.simulateData(JSON.stringify(elicitationRequest) + "\n");
+
+				await wait(10);
+
+				const written = mockSocket.getWrittenData();
+				const response = written.find((w) => {
+					const parsed = JSON.parse(w);
+					return parsed.id === "elicit-error";
+				});
+
+				expect(response).toBeDefined();
+				const parsedResponse = JSON.parse(response!);
+				expect(parsedResponse.result).toEqual({ action: "decline" });
+				expect(consoleErrorSpy).toHaveBeenCalled();
+
+				consoleErrorSpy.mockRestore();
+			});
+		});
+
+		describe("timeout handling", () => {
+			it("should send decline response when callback times out", async () => {
+				jest.useFakeTimers();
+
+				const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+				// Create a callback that never resolves
+				const callback = jest.fn<ElicitationCallback>().mockImplementation(() => new Promise(() => {}));
+				client.onElicitation(callback);
+
+				const elicitationRequest = {
+					id: "elicit-timeout",
+					method: "elicitation/create",
+					params: {
+						message: "Enter name",
+						mode: "form",
+						requestedSchema: { type: "object", properties: {} },
+					},
+				};
+				mockSocket.simulateData(JSON.stringify(elicitationRequest) + "\n");
+
+				// Fast-forward past the elicitation timeout (120 seconds)
+				jest.advanceTimersByTime(121000);
+
+				// Need to let the async code run
+				await Promise.resolve();
+				jest.advanceTimersByTime(0);
+				await Promise.resolve();
+
+				const written = mockSocket.getWrittenData();
+				const response = written.find((w) => {
+					const parsed = JSON.parse(w);
+					return parsed.id === "elicit-timeout";
+				});
+
+				expect(response).toBeDefined();
+				const parsedResponse = JSON.parse(response!);
+				expect(parsedResponse.result).toEqual({ action: "decline" });
+
+				consoleErrorSpy.mockRestore();
+				jest.useRealTimers();
+			});
+		});
+
+		describe("message stream parsing", () => {
+			it("should handle elicitation requests mixed with other messages", async () => {
+				const notificationCallback = jest.fn();
+				const elicitationCallback = jest.fn<ElicitationCallback>().mockResolvedValue({ action: "cancel" });
+
+				client.onNotification(notificationCallback);
+				client.onElicitation(elicitationCallback);
+
+				// Start a request
+				const requestPromise = client.getTools();
+				const written = mockSocket.getWrittenData();
+				const req = JSON.parse(written[0] ?? "{}");
+
+				// Send notification, elicitation, and response in one chunk
+				const notification = { method: "event/test" };
+				const elicitation = {
+					id: "elicit-mixed",
+					method: "elicitation/create",
+					params: {
+						message: "Test",
+						mode: "form",
+						requestedSchema: { type: "object", properties: {} },
+					},
+				};
+				const response = { id: req.id, result: { tools: [] } };
+
+				mockSocket.simulateData(
+					JSON.stringify(notification) + "\n" +
+					JSON.stringify(elicitation) + "\n" +
+					JSON.stringify(response) + "\n"
+				);
+
+				const result = await requestPromise;
+
+				await wait(10);
+
+				expect(result).toEqual([]);
+				expect(notificationCallback).toHaveBeenCalledWith("event/test", undefined);
+				expect(elicitationCallback).toHaveBeenCalled();
+			});
+		});
+
+		describe("error handling", () => {
+			it("should log error when receiving invalid JSON message", async () => {
+				const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+				const connectPromise = client.connect(100);
+				mockSocket.simulateConnect();
+				await connectPromise;
+
+				// Send invalid JSON
+				mockSocket.simulateData("not valid json\n");
+
+				await wait(10);
+
+				expect(consoleSpy).toHaveBeenCalledWith(
+					expect.stringContaining("[MCP Bridge]"),
+					expect.any(SyntaxError)
+				);
+
+				consoleSpy.mockRestore();
+			});
+
+			it("should log error when sending elicitation response with destroyed socket", async () => {
+				const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+				const connectPromise = client.connect(100);
+				mockSocket.simulateConnect();
+				await connectPromise;
+
+				// Register callback that returns after delay
+				const elicitationCallback = jest.fn<ElicitationCallback>().mockImplementation(async () => {
+					// Wait a bit, then return
+					await wait(50);
+					return { action: "accept", content: { name: "test" } };
+				});
+				client.onElicitation(elicitationCallback);
+
+				// Send elicitation request
+				const elicitation = {
+					id: "elicit-destroy",
+					method: "elicitation/create",
+					params: {
+						message: "Enter name",
+						mode: "form",
+						requestedSchema: { type: "object", properties: {} },
+					},
+				};
+				mockSocket.simulateData(JSON.stringify(elicitation) + "\n");
+
+				// Before callback completes, destroy the socket
+				await wait(10);
+				mockSocket.destroy();
+
+				// Wait for callback to complete
+				await wait(100);
+
+				expect(consoleSpy).toHaveBeenCalledWith(
+					expect.stringContaining("[MCP Bridge] Cannot send elicitation response: not connected")
+				);
+
+				consoleSpy.mockRestore();
 			});
 		});
 	});

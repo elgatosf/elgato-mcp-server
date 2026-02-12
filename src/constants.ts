@@ -31,6 +31,9 @@ export const RECONNECT_POLL_INTERVAL_MS = 3000;
 /** Timeout for IPC requests (ms). */
 export const REQUEST_TIMEOUT_MS = 30_000;
 
+/** Timeout for elicitation requests (ms). User input may take longer. */
+export const ELICITATION_TIMEOUT_MS = 5 * 60_000;
+
 /** Maximum buffer size for IPC messages (1 MB). */
 export const MAX_BUFFER_SIZE = 1024 * 1024;
 

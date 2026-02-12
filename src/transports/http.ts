@@ -245,7 +245,7 @@ export async function startHttpTransport(options: HttpTransportOptions = {}): Pr
 			}
 		}
 	});
-	
+
 	bridge.onResourcesChanged(async () => {
 		for (const [sessionId, session] of sessions) {
 			try {

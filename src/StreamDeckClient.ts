@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 
 import {
+	ELICITATION_TIMEOUT_MS,
 	LOG_PREFIX,
 	MAX_BUFFER_SIZE,
 	QUICK_CONNECT_TIMEOUT_MS,
@@ -13,6 +14,9 @@ import {
 import type {
 	CallToolRequest,
 	CallToolResponse,
+	ElicitationCallback,
+	ElicitationRequest,
+	ElicitationResponse,
 	IpcResponse,
 	McpResource,
 	McpTool,
@@ -46,6 +50,7 @@ export type ServerFactory = (connectionListener?: (socket: net.Socket) => void) 
  */
 export class StreamDeckClient {
 	private buffer = "";
+	private elicitationCallback: ElicitationCallback | null = null;
 	private notificationCallbacks: NotificationCallback[] = [];
 	private onConnectedCallback: (() => void) | null = null;
 	private onDisconnectedCallback: (() => void) | null = null;
@@ -207,6 +212,16 @@ export class StreamDeckClient {
 	}
 
 	/**
+	 * Registers a callback to handle elicitation requests from Stream Deck.
+	 * Only one callback can be registered at a time.
+	 * The callback receives elicitation params and must return a response.
+	 * @param callback - Async callback function that handles elicitation requests.
+	 */
+	public onElicitation(callback: ElicitationCallback): void {
+		this.elicitationCallback = callback;
+	}
+
+	/**
 	 * Reads a resource by URI from Stream Deck.
 	 * @param uri - The resource URI to read.
 	 * @returns The resource read result containing contents.
@@ -262,7 +277,7 @@ export class StreamDeckClient {
 		this.buffer += typeof data === "string" ? data : data.toString();
 
 		if (this.buffer.length > MAX_BUFFER_SIZE) {
-			console.error(`${LOG_PREFIX} Buffer overflow, clearing buffer`);
+			console.error(`CLIENT: Buffer overflow, clearing buffer`);
 			this.buffer = "";
 			return;
 		}
@@ -280,6 +295,44 @@ export class StreamDeckClient {
 
 	private handleError(error: Error): void {
 		console.error(`${LOG_PREFIX} Socket error:`, error.message);
+	}
+
+	/**
+	 * Handles an elicitation request from Stream Deck.
+	 * Invokes the registered callback and sends the response back to Stream Deck.
+	 * @param request - The elicitation request from Stream Deck.
+	 */
+	private async handleElicitationRequest(request: ElicitationRequest): Promise<void> {
+		const { id, params } = request;
+
+		let response: ElicitationResponse;
+
+		console.error(`CLIENT: Elicitation request received: ${params}`);
+
+		if (!this.elicitationCallback) {
+			// No callback registered - decline the request
+			console.error(`CLIENT: No elicitation callback registered, declining request`);
+			response = { action: "decline" };
+		} else {
+			try {
+				// Create a promise that will timeout after ELICITATION_TIMEOUT_MS
+				const timeoutPromise = new Promise<ElicitationResponse>((_, reject) => {
+					setTimeout(() => {
+						reject(new Error("Elicitation timeout"));
+					}, ELICITATION_TIMEOUT_MS);
+				});
+
+				// Race between the callback and the timeout
+				response = await Promise.race([this.elicitationCallback(params), timeoutPromise]);
+			} catch (error) {
+				const message = error instanceof Error ? error.message : "Unknown error";
+				console.error(`CLIENT: Elicitation callback error:`, message);
+				response = { action: "decline" };
+			}
+		}
+
+		// Send response back to Stream Deck
+		this.sendElicitationResponse(id, response);
 	}
 
 	/**
@@ -351,13 +404,32 @@ export class StreamDeckClient {
 	}
 
 	/**
+	 * Type guard to check if an object is an elicitation request.
+	 * An elicitation request has both `id` and `method: "elicitation/create"`.
+	 * @param obj - The object to check.
+	 * @returns True if the object is an elicitation request.
+	 */
+	private isElicitationRequest(obj: object): obj is ElicitationRequest {
+		const record = obj as Record<string, unknown>;
+		return (
+			"id" in obj &&
+			typeof record.id === "string" &&
+			"method" in obj &&
+			record.method === "elicitation/create" &&
+			"params" in obj &&
+			typeof record.params === "object"
+		);
+	}
+
+	/**
 	 * Type guard to check if an object is an IPC response.
-	 * A response has an `id` field of type string.
+	 * A response has an `id` field of type string but no `method` field.
 	 * @param obj - The object to check.
 	 * @returns True if the object is an IPC response.
 	 */
 	private isIpcResponse(obj: object): obj is IpcResponse {
-		return "id" in obj && typeof (obj as Record<string, unknown>).id === "string";
+		const record = obj as Record<string, unknown>;
+		return "id" in obj && typeof record.id === "string" && !("method" in obj);
 	}
 
 	/**
@@ -407,7 +479,7 @@ export class StreamDeckClient {
 
 	/**
 	 * Parses and processes an incoming IPC message.
-	 * Delegates to handleResponse() or handleNotification() based on message type.
+	 * Delegates to handleElicitationRequest(), handleResponse(), or handleNotification() based on message type.
 	 * @param message - The raw IPC message string to parse and process.
 	 */
 	private processMessage(message: string): void {
@@ -419,7 +491,10 @@ export class StreamDeckClient {
 				return;
 			}
 
-			if (this.isIpcResponse(parsed)) {
+			// Check elicitation first since it has both id and method
+			if (this.isElicitationRequest(parsed)) {
+				void this.handleElicitationRequest(parsed);
+			} else if (this.isIpcResponse(parsed)) {
 				this.handleResponse(parsed);
 			} else if (this.isNotification(parsed)) {
 				this.handleNotification(parsed);
@@ -451,6 +526,27 @@ export class StreamDeckClient {
 
 			this.socket!.write(JSON.stringify(fullRequest) + "\n");
 		});
+	}
+
+	/**
+	 * Sends an elicitation response back to Stream Deck.
+	 * Uses the original request's id for correlation.
+	 * @param id - The id from the original elicitation request.
+	 * @param response - The elicitation response to send.
+	 */
+	private sendElicitationResponse(id: string, response: ElicitationResponse): void {
+		if (!this.socket || this.socket.destroyed) {
+			console.error(`${LOG_PREFIX} Cannot send elicitation response: not connected`);
+			return;
+		}
+
+		const ipcResponse = {
+			id,
+			method: "elicitation/response",
+			result: response,
+		};
+
+		this.socket.write(JSON.stringify(ipcResponse) + "\n");
 	}
 
 	private setupSocketHandlers(): void {

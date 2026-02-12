@@ -17,7 +17,7 @@ import {
 
 import { DEFAULT_SERVER_INFO, SDK_NOTIFICATIONS } from "./constants.js";
 import { StreamDeckClient } from "./StreamDeckClient.js";
-import type { ServerInfo } from "./types.js";
+import type { ElicitationParams, ElicitationResponse, ServerInfo } from "./types.js";
 import { convertToMcpResources, convertToMcpTools, log } from "./utils.js";
 
 /**
@@ -27,6 +27,7 @@ import { convertToMcpResources, convertToMcpTools, log } from "./utils.js";
  * dynamically discovering and exposing Stream Deck tools through the MCP protocol.
  */
 export class McpBridge {
+	private activeMcpServer: McpServer | null = null;
 	private cachedResources: Resource[] = [];
 	private cachedTools: Tool[] = [];
 	private client: StreamDeckClient;
@@ -257,6 +258,9 @@ export class McpBridge {
 				};
 			}
 
+			// Store the McpServer reference for use by the elicitation callback
+			this.activeMcpServer = mcpServer;
+
 			try {
 				const response = await this.client.callTool(name, args);
 
@@ -284,6 +288,9 @@ export class McpBridge {
 					content: [{ type: "text", text: message }],
 					isError: true,
 				};
+			} finally {
+				// Clear the McpServer reference when the tool call completes
+				this.activeMcpServer = null;
 			}
 		});
 
@@ -375,6 +382,38 @@ export class McpBridge {
 
 		this.client.onNotification((method, params) => {
 			void this.handleStreamDeckNotification(method, params);
+		});
+
+		// Handle elicitation requests from Stream Deck
+		this.client.onElicitation(async (params: ElicitationParams): Promise<ElicitationResponse> => {
+			if (!this.activeMcpServer) {
+				log("No active MCP server context for elicitation, declining");
+				return { action: "decline" };
+			}
+
+			try {
+				// Cast the schema - Stream Deck provides a JSON Schema object that matches MCP's expected format
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
+				log("Forwarding elicitation to MCP client:", params);
+
+				const result = await this.activeMcpServer.server.elicitInput({
+					mode: params.mode,
+					message: params.message,
+					requestedSchema: params.requestedSchema as any,
+				});
+
+				log("Elicitation result from MCP client:", result);
+
+				return {
+					action: result.action,
+					content: result.content,
+				};
+			} catch (error) {
+				const message = error instanceof Error ? error.message : "Unknown error";
+				log("Failed to forward elicitation to MCP client:", message);
+				return { action: "decline" };
+			}
 		});
 	}
 }

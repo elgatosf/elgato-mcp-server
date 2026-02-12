@@ -278,6 +278,43 @@ export interface Notification {
 export type NotificationCallback = (method: string, params?: unknown) => void;
 
 /**
+ * Parameters for an elicitation request from Stream Deck.
+ */
+export interface ElicitationParams {
+	message: string;
+	mode: "form";
+	requestedSchema: Record<string, unknown>;
+}
+
+/**
+ * Elicitation request from Stream Deck.
+ * Unlike regular notifications, elicitation requests have both an id and a method.
+ * The id is used to correlate the response back to Stream Deck.
+ */
+export interface ElicitationRequest {
+	id: string;
+	method: "elicitation/create";
+	params: ElicitationParams;
+}
+
+/**
+ * Response to an elicitation request.
+ * - "accept": User provided input, content contains the data matching requestedSchema
+ * - "cancel": User cancelled the elicitation
+ * - "decline": Client doesn't support elicitation or couldn't process the request
+ */
+export interface ElicitationResponse {
+	action: "accept" | "cancel" | "decline";
+	content?: Record<string, unknown>;
+}
+
+/**
+ * Callback function type for handling elicitation requests from Stream Deck.
+ * Returns a promise that resolves to the user's response.
+ */
+export type ElicitationCallback = (params: ElicitationParams) => Promise<ElicitationResponse>;
+
+/**
  * Transport mode for the MCP server.
  */
 export type TransportMode = "http" | "stdio";

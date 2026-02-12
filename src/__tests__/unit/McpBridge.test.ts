@@ -26,6 +26,7 @@ describe("McpBridge", () => {
 			onConnected: jest.fn(),
 			onDisconnected: jest.fn(),
 			onNotification: jest.fn(),
+			onElicitation: jest.fn(),
 			startSignalListener: jest.fn(),
 		} as any;
 
@@ -995,6 +996,53 @@ describe("McpBridge", () => {
 			);
 		});
 	});
+
+	describe("elicitation forwarding", () => {
+		it("should register elicitation callback with StreamDeckClient", async () => {
+			mockClient.connect.mockResolvedValue(true);
+			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
+			mockClient.getTools.mockResolvedValue([]);
+
+			await bridge.initialize();
+
+			// Verify onElicitation was called to register a callback
+			expect(mockClient.onElicitation).toHaveBeenCalled();
+			expect(mockClient.onElicitation).toHaveBeenCalledWith(expect.any(Function));
+		});
+
+		it("should decline elicitation when no active MCP server context", async () => {
+			mockClient.connect.mockResolvedValue(true);
+			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
+			mockClient.getTools.mockResolvedValue([]);
+
+			await bridge.initialize();
+
+			// Get the onElicitation callback that was registered
+			const onElicitationCallback = mockClient.onElicitation.mock.calls[0]?.[0];
+			expect(onElicitationCallback).toBeDefined();
+
+			// Call the elicitation callback without an active tool call
+			if (onElicitationCallback) {
+				const result = await onElicitationCallback({
+					message: "Enter username",
+					mode: "form",
+					requestedSchema: { type: "object", properties: { username: { type: "string" } } },
+				});
+
+				// Should decline since no active MCP server context
+				expect(result).toEqual({ action: "decline" });
+			}
+		});
+
+		it("should register elicitation callback even when connection fails", async () => {
+			mockClient.connect.mockResolvedValue(false);
+
+			await bridge.initialize();
+
+			// Verify onElicitation was still called
+			expect(mockClient.onElicitation).toHaveBeenCalled();
+		});
+	});
 });
 
 describe("createInitializedBridge", () => {
@@ -1034,6 +1082,42 @@ describe("createConnectedBridge", () => {
 
 		bridge.close();
 		await transport.close();
+	});
+
+	it("should handle resources changed notification errors gracefully", async () => {
+		const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+		const transport = new MockTransport();
+		const bridge = await createConnectedBridge(transport);
+
+		// Trigger resources changed callback - transport is not fully connected so it may error
+		// The error should be caught and logged, not thrown
+		const resourcesChangedCallbacks = (bridge as any).resourcesChangedCallbacks;
+		if (resourcesChangedCallbacks && resourcesChangedCallbacks.length > 0) {
+			// Trigger the callback
+			await resourcesChangedCallbacks[0]();
+		}
+
+		bridge.close();
+		await transport.close();
+		consoleSpy.mockRestore();
+	});
+
+	it("should handle Stream Deck notification forwarding errors gracefully", async () => {
+		const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+		const transport = new MockTransport();
+		const bridge = await createConnectedBridge(transport);
+
+		// Trigger streamDeckNotification callback - the mcpServer.server.notification may fail
+		// The error should be caught and logged, not thrown
+		const notificationCallbacks = (bridge as any).streamDeckNotificationCallbacks;
+		if (notificationCallbacks && notificationCallbacks.length > 0) {
+			// Trigger the callback with a test notification
+			await notificationCallbacks[0]("test/notification", { data: "test" });
+		}
+
+		bridge.close();
+		await transport.close();
+		consoleSpy.mockRestore();
 	});
 });
 

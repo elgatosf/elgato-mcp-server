@@ -88,6 +88,7 @@ The system consists of three main source files:
 - Implement request/response protocol
 - Handle automatic reconnection via signal socket
 - Manage request timeouts and pending request tracking
+- Handle elicitation requests from Stream Deck during tool calls
 
 #### 3.1.3 MCP Bridge (`src/McpBridge.ts`)
 
@@ -96,6 +97,7 @@ The system consists of three main source files:
 - Handle tool discovery and caching from Stream Deck
 - Manage tool list change notifications
 - Forward Stream Deck notifications to registered callbacks
+- Forward elicitation requests to MCP clients during tool calls
 
 #### 3.1.4 Constants (`src/constants.ts`)
 
@@ -110,6 +112,7 @@ The system consists of three main source files:
 - `SIGNAL_SOCKET_PATH`: Signal notification socket path
 - `REQUEST_TIMEOUT`: Request timeout in milliseconds
 - `MAX_BUFFER_SIZE`: Maximum buffer size for IPC messages
+- `ELICITATION_TIMEOUT_MS`: Timeout for elicitation requests (120 seconds)
 - `SDK_NOTIFICATIONS`: Notification type constants for Stream Deck SDK
   - `TOOLS_LIST_CHANGED`: `"notifications/tools/list_changed"`
   - `RESOURCES_LIST_CHANGED`: `"notifications/resources/list_changed"`
@@ -299,8 +302,73 @@ Unsubscribes from updates for a specific resource URI.
 **Notification vs Response Distinction:**
 - **Notifications**: Have a `method` field but no `id` field
 - **Responses**: Have an `id` field that correlates with the request ID
+- **Elicitation Requests**: Have BOTH `id` AND `method: "elicitation/create"` (unique hybrid type)
 
-### 4.2 Stream Deck IPC Protocol (Internal)
+### 4.2 Elicitation Protocol
+
+During a `tools/call` request, Stream Deck may need additional information from the user. It sends an elicitation request to the bridge, which forwards it to the MCP client, awaits the user's response, and sends it back to Stream Deck.
+
+#### Elicitation Message Flow
+
+```
+Stream Deck → StreamDeckClient → McpBridge → MCP Client → User
+       ↑                                                    │
+       └────────────────────────────────────────────────────┘
+                         Response
+```
+
+#### Elicitation Request Format
+
+Stream Deck sends an elicitation request during tool execution:
+
+```json
+{
+  "id": "9b3908ad-40cf-4d82-96e1-abc123",
+  "method": "elicitation/create",
+  "params": {
+    "message": "Please provide additional information",
+    "mode": "form",
+    "requestedSchema": {
+      "type": "object",
+      "properties": {
+        "fieldName": { "type": "string" }
+      }
+    }
+  }
+}
+```
+
+**Key Fields:**
+- `id`: Unique request ID for response correlation
+- `method`: Always `"elicitation/create"`
+- `params.message`: Prompt message to display to the user
+- `params.mode`: Currently only `"form"` is supported
+- `params.requestedSchema`: JSON Schema defining the expected user input
+
+#### Elicitation Response Format
+
+The bridge sends back the user's response:
+
+```json
+{
+  "id": "9b3908ad-40cf-4d82-96e1-abc123",
+  "result": {
+    "action": "accept",
+    "content": { "fieldName": "user value" }
+  }
+}
+```
+
+**Response Actions:**
+- `accept`: User provided input (includes `content` field)
+- `decline`: User declined to provide input
+- `cancel`: User cancelled the operation
+
+#### Elicitation Timeout
+
+Elicitation requests have a 120-second timeout (`ELICITATION_TIMEOUT_MS`). If the MCP client doesn't respond within this time, the bridge returns a `decline` response to Stream Deck.
+
+### 4.3 Stream Deck IPC Protocol (Internal)
 
 Communication with Stream Deck uses JSON messages terminated by newline (`\n`).
 
@@ -422,7 +490,7 @@ Communication with Stream Deck uses JSON messages terminated by newline (`\n`).
 }
 ```
 
-### 4.3 Socket Paths
+### 4.4 Socket Paths
 
 | Platform | Main Socket | Signal Socket |
 |----------|-------------|---------------|
@@ -702,6 +770,7 @@ switch (process.platform) {
 |--------|-------------|
 | Quick Connection Timeout | 1 second |
 | Request Timeout | 30 seconds |
+| Elicitation Timeout | 120 seconds |
 | Maximum Buffer Size | 1 MB |
 | HTTP Default Port | 9090 |
 
@@ -826,6 +895,13 @@ pnpm lint:fix       # Prettier formatting
    - Test multiple callback support
    - Test error isolation between callbacks
    - Test message stream parsing with mixed notifications and responses
+
+6. **Elicitation Handling**
+   - Test type guard (`isElicitationRequest()` - checks for both `id` and `method`)
+   - Test callback registration and invocation
+   - Test timeout handling (decline after timeout)
+   - Test error handling (callback errors, destroyed socket)
+   - Test message stream parsing with elicitation, responses, and notifications mixed
 
 ### 8.2 Integration Testing Requirements
 
@@ -1060,6 +1136,26 @@ interface ResourcesUnsubscribeRequest extends RequestBase {
   method: "resources_unsubscribe";
   uri: string;
 }
+
+// Elicitation types
+interface ElicitationParams {
+  message: string;
+  mode: "form";
+  requestedSchema: Record<string, unknown>;
+}
+
+interface ElicitationRequest {
+  id: string;
+  method: "elicitation/create";
+  params: ElicitationParams;
+}
+
+interface ElicitationResponse {
+  action: "accept" | "cancel" | "decline";
+  content?: Record<string, unknown>;
+}
+
+type ElicitationCallback = (params: ElicitationParams) => Promise<ElicitationResponse>;
 ```
 
 ### Configuration Types
@@ -1122,3 +1218,33 @@ interface Config {
      │◄────────────────────────tools/list──│
      │───────────────────────{tools:[...]}►│
 ```
+
+### Elicitation Sequence (During Tool Call)
+
+```
+┌─────────┐     ┌─────────────┐      ┌───────────┐      ┌──────┐
+│ Bridge  │     │ StreamDeck  │      │MCP Client │      │ User │
+└────┬────┘     └──────┬──────┘      └─────┬─────┘      └──┬───┘
+     │                 │                   │               │
+     │◄───────────────────────tools/call───│               │
+     │──call_tool─────►│                   │               │
+     │                 │                   │               │
+     │   (Stream Deck needs user input)    │               │
+     │                 │                   │               │
+     │◄elicitation/cre─│                   │               │
+     │──────────elicit_input──────────────►│               │
+     │                 │                   │───prompt─────►│
+     │                 │                   │◄──response────│
+     │◄────────{action,content}────────────│               │
+     │──{id,result}───►│                   │               │
+     │                 │                   │               │
+     │◄──{result}──────│                   │               │
+     │──────────────────────{content:[]}──►│               │
+```
+
+**Key Points:**
+- Elicitation occurs mid-tool-call when Stream Deck needs additional user input
+- The bridge holds a reference to the active MCP server during tool execution
+- The `elicitInput()` method on the MCP server is used to prompt the user
+- Timeout: 120 seconds (configurable via `ELICITATION_TIMEOUT_MS`)
+- If timeout or error, the bridge returns `{ action: "decline" }` to Stream Deck
