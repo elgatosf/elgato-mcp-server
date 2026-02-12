@@ -69,7 +69,7 @@ export class StreamDeckClient {
 	 */
 	constructor(
 		socketFactory: SocketFactory = (path: string) => net.createConnection(path),
-		serverFactory: ServerFactory = (listener) => net.createServer(listener)
+		serverFactory: ServerFactory = (listener) => net.createServer(listener),
 	) {
 		this.socketFactory = socketFactory;
 		this.serverFactory = serverFactory;
@@ -86,16 +86,21 @@ export class StreamDeckClient {
 	 * Invokes a tool on Stream Deck.
 	 * @param toolName - Name of the tool to invoke.
 	 * @param args - Arguments to pass to the tool.
+	 * @param requestId - Optional request ID to use for correlation. If provided, must be unique.
 	 * @returns The tool call response.
 	 */
-	public async callTool(toolName: string, args: Record<string, unknown>): Promise<CallToolResponse> {
+	public async callTool(
+		toolName: string,
+		args: Record<string, unknown>,
+		requestId?: string,
+	): Promise<CallToolResponse> {
 		const request: Omit<CallToolRequest, "id"> = {
 			method: "call_tool",
 			toolName,
 			arguments: args,
 		};
 
-		return this.sendRequest<CallToolResponse>(request);
+		return this.sendRequest<CallToolResponse>(request, requestId);
 	}
 
 	/**
@@ -303,7 +308,7 @@ export class StreamDeckClient {
 
 		let response: ElicitationResponse;
 
-		console.error(`CLIENT: Elicitation request received: ${params}`);
+		console.error("CLIENT: Elicitation request received: ", params);
 
 		if (!this.elicitationCallback) {
 			// No callback registered - decline the request
@@ -525,12 +530,24 @@ export class StreamDeckClient {
 		this.socket.write(JSON.stringify(ipcResponse) + "\n");
 	}
 
-	private async sendRequest<T extends IpcResponse>(request: object): Promise<T> {
+	private async sendRequest<T extends IpcResponse>(request: object, requestId?: string): Promise<T> {
 		if (!this.socket || this.socket.destroyed) {
 			throw new Error("Not connected to Stream Deck");
 		}
 
-		const id = String(++this.requestId);
+		// Use provided requestId or generate a new one
+		let id: string;
+		if (requestId !== undefined) {
+			// Check for collision with existing pending request
+			if (this.pendingRequests.has(requestId)) {
+				console.error(`${LOG_PREFIX} Request ID collision: ${requestId} is already pending, cancelling request`);
+				throw new Error(`Request ID collision: ${requestId} is already pending`);
+			}
+			id = requestId;
+		} else {
+			id = String(++this.requestId);
+		}
+
 		const fullRequest = { ...request, id };
 
 		return new Promise<T>((resolve, reject) => {

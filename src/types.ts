@@ -284,6 +284,8 @@ export interface ElicitationParams {
 	message: string;
 	mode: "form";
 	requestedSchema: Record<string, unknown>;
+	/** The ID of the related tool call, used to route elicitations to the correct MCP session. */
+	relatedToolCallId: string;
 }
 
 /**
@@ -310,6 +312,7 @@ export interface ElicitationResponse {
 
 /**
  * Callback function type for handling elicitation requests from Stream Deck.
+ * @param params - The elicitation parameters including the relatedToolCallId for routing.
  * Returns a promise that resolves to the user's response.
  */
 export type ElicitationCallback = (params: ElicitationParams) => Promise<ElicitationResponse>;

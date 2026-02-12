@@ -1052,6 +1052,7 @@ describe("StreamDeckClient", () => {
 							type: "object",
 							properties: { name: { type: "string" } },
 						},
+						relatedToolCallId: "tool-call-1",
 					},
 				};
 				mockSocket.simulateData(JSON.stringify(elicitationRequest) + "\n");
@@ -1065,6 +1066,7 @@ describe("StreamDeckClient", () => {
 						type: "object",
 						properties: { name: { type: "string" } },
 					},
+					relatedToolCallId: "tool-call-1",
 				});
 			});
 
@@ -1139,6 +1141,7 @@ describe("StreamDeckClient", () => {
 						message: "Test",
 						mode: "form",
 						requestedSchema: { type: "object", properties: {} },
+						relatedToolCallId: "tool-call-456",
 					},
 				};
 				mockSocket.simulateData(JSON.stringify(elicitationRequest) + "\n");
@@ -1163,6 +1166,7 @@ describe("StreamDeckClient", () => {
 						message: "Enter name",
 						mode: "form",
 						requestedSchema: { type: "object", properties: { name: { type: "string" } } },
+						relatedToolCallId: "tool-call-789",
 					},
 				};
 				mockSocket.simulateData(JSON.stringify(elicitationRequest) + "\n");
@@ -1192,6 +1196,7 @@ describe("StreamDeckClient", () => {
 						message: "Enter name",
 						mode: "form",
 						requestedSchema: { type: "object", properties: {} },
+						relatedToolCallId: "tool-call-no-cb",
 					},
 				};
 				mockSocket.simulateData(JSON.stringify(elicitationRequest) + "\n");
@@ -1222,6 +1227,7 @@ describe("StreamDeckClient", () => {
 						message: "Enter name",
 						mode: "form",
 						requestedSchema: { type: "object", properties: {} },
+						relatedToolCallId: "tool-call-error",
 					},
 				};
 				mockSocket.simulateData(JSON.stringify(elicitationRequest) + "\n");
@@ -1264,6 +1270,7 @@ describe("StreamDeckClient", () => {
 						message: "Enter name",
 						mode: "form",
 						requestedSchema: { type: "object", properties: {} },
+						relatedToolCallId: "tool-call-timeout",
 					},
 				};
 				mockSocket.simulateData(JSON.stringify(elicitationRequest) + "\n");
@@ -1311,6 +1318,7 @@ describe("StreamDeckClient", () => {
 						message: "Test",
 						mode: "form",
 						requestedSchema: { type: "object", properties: {} },
+						relatedToolCallId: "tool-call-mixed",
 					},
 				};
 				const response = { id: req.id, result: { tools: [] } };
@@ -1369,6 +1377,7 @@ describe("StreamDeckClient", () => {
 						message: "Enter name",
 						mode: "form",
 						requestedSchema: { type: "object", properties: {} },
+						relatedToolCallId: "tool-call-destroy",
 					},
 				};
 				mockSocket.simulateData(JSON.stringify(elicitation) + "\n");

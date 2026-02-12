@@ -1010,7 +1010,7 @@ describe("McpBridge", () => {
 			expect(mockClient.onElicitation).toHaveBeenCalledWith(expect.any(Function));
 		});
 
-		it("should decline elicitation when no active MCP server context", async () => {
+		it("should decline elicitation when no active MCP server context (unknown correlation ID)", async () => {
 			mockClient.connect.mockResolvedValue(true);
 			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
 			mockClient.getTools.mockResolvedValue([]);
@@ -1021,15 +1021,16 @@ describe("McpBridge", () => {
 			const onElicitationCallback = mockClient.onElicitation.mock.calls[0]?.[0];
 			expect(onElicitationCallback).toBeDefined();
 
-			// Call the elicitation callback without an active tool call
+			// Call the elicitation callback with an unknown correlation ID
 			if (onElicitationCallback) {
 				const result = await onElicitationCallback({
 					message: "Enter username",
 					mode: "form",
 					requestedSchema: { type: "object", properties: { username: { type: "string" } } },
+					relatedToolCallId: "unknown-correlation-id",
 				});
 
-				// Should decline since no active MCP server context
+				// Should decline since no active MCP server context for this correlation ID
 				expect(result).toEqual({ action: "decline" });
 			}
 		});
