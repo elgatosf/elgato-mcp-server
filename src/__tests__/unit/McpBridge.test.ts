@@ -1043,6 +1043,233 @@ describe("McpBridge", () => {
 			// Verify onElicitation was still called
 			expect(mockClient.onElicitation).toHaveBeenCalled();
 		});
+
+		it("should forward elicitation to active MCP server during tool call and return response", async () => {
+			mockClient.connect.mockResolvedValue(true);
+			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
+			mockClient.getTools.mockResolvedValue([]);
+			(mockClient as any).isConnected = true;
+
+			await bridge.initialize();
+
+			// Create a deferred promise to control when callTool resolves
+			let resolveToolCall!: () => void;
+			const toolCallPromise = new Promise<void>((resolve) => {
+				resolveToolCall = resolve;
+			});
+
+			// Make callTool block until we manually resolve it
+			mockClient.callTool.mockImplementation(async (): Promise<any> => {
+				await toolCallPromise;
+				return { id: "1", result: { success: true } };
+			});
+
+			// Create the MCP server and connect a mock transport
+			const mcpServer = bridge.createServer();
+
+			// Mock the elicitInput method on the low-level server
+			const mockElicitInput = jest
+				.fn<(params: any) => Promise<{ action: string; content?: Record<string, unknown> }>>()
+				.mockResolvedValue({
+					action: "accept",
+					content: { username: "testuser", password: "secret123" },
+				});
+			(mcpServer.server as any).elicitInput = mockElicitInput;
+
+			// Create a mock transport and connect
+			// The sessionId on the transport is used by the SDK to build the correlation ID
+			const mockTransport = new MockTransport();
+			mockTransport.sessionId = "test-session-123";
+			await mcpServer.connect(mockTransport);
+
+			// Simulate a tools/call request to trigger the handler
+			// The SDK will build extra.sessionId from transport.sessionId and extra.requestId from message.id
+			const toolCallRequest = {
+				jsonrpc: "2.0" as const,
+				id: 42,
+				method: "tools/call",
+				params: { name: "test_tool", arguments: { param1: "value1" } },
+			};
+
+			// Trigger the tool call (this will block on our deferred promise)
+			mockTransport.simulateIncomingMessage(toolCallRequest);
+			// Give the handler time to start and register the correlation ID
+			await wait(50);
+
+			// Verify callTool was called and capture the correlation ID
+			expect(mockClient.callTool).toHaveBeenCalled();
+			const capturedCorrelationId = mockClient.callTool.mock.calls[0]?.[2];
+			expect(capturedCorrelationId).toBeDefined();
+
+			// Get the onElicitation callback that was registered
+			const onElicitationCallback = mockClient.onElicitation.mock.calls[0]?.[0];
+			expect(onElicitationCallback).toBeDefined();
+
+			// Trigger elicitation with the matching correlation ID
+			if (onElicitationCallback) {
+				const elicitationResult = await onElicitationCallback({
+					message: "Please enter your credentials",
+					mode: "form",
+					requestedSchema: {
+						type: "object",
+						properties: {
+							username: { type: "string" },
+							password: { type: "string" },
+						},
+					},
+					relatedToolCallId: capturedCorrelationId as string,
+				});
+
+				// Verify elicitInput was called with correct parameters
+				expect(mockElicitInput).toHaveBeenCalledWith({
+					message: "Please enter your credentials",
+					mode: "form",
+					requestedSchema: {
+						type: "object",
+						properties: {
+							username: { type: "string" },
+							password: { type: "string" },
+						},
+					},
+				});
+
+				// Verify the response was forwarded correctly
+				expect(elicitationResult).toEqual({
+					action: "accept",
+					content: { username: "testuser", password: "secret123" },
+				});
+			}
+
+			// Complete the tool call to clean up
+			resolveToolCall();
+		});
+
+		it("should return decline when elicitInput throws an error", async () => {
+			mockClient.connect.mockResolvedValue(true);
+			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
+			mockClient.getTools.mockResolvedValue([]);
+			(mockClient as any).isConnected = true;
+
+			await bridge.initialize();
+
+			// Create a deferred promise to control when callTool resolves
+			let resolveToolCall!: () => void;
+			const toolCallPromise = new Promise<void>((resolve) => {
+				resolveToolCall = resolve;
+			});
+
+			mockClient.callTool.mockImplementation(async (): Promise<any> => {
+				await toolCallPromise;
+				return { id: "1", result: { success: true } };
+			});
+
+			const mcpServer = bridge.createServer();
+
+			// Mock elicitInput to throw an error
+			const mockElicitInput = jest
+				.fn<(params: any) => Promise<{ action: string; content?: Record<string, unknown> }>>()
+				.mockRejectedValue(new Error("Client disconnected"));
+			(mcpServer.server as any).elicitInput = mockElicitInput;
+
+			const mockTransport = new MockTransport();
+			mockTransport.sessionId = "test-session-456";
+			await mcpServer.connect(mockTransport);
+
+			const toolCallRequest = {
+				jsonrpc: "2.0" as const,
+				id: 99,
+				method: "tools/call",
+				params: { name: "test_tool", arguments: {} },
+			};
+
+			mockTransport.simulateIncomingMessage(toolCallRequest);
+			await wait(50);
+
+			const capturedCorrelationId = mockClient.callTool.mock.calls[0]?.[2];
+			const onElicitationCallback = mockClient.onElicitation.mock.calls[0]?.[0];
+
+			// Trigger elicitation - should catch the error and return decline
+			if (onElicitationCallback) {
+				const elicitationResult = await onElicitationCallback({
+					message: "Enter data",
+					mode: "form",
+					requestedSchema: { type: "object" },
+					relatedToolCallId: capturedCorrelationId as string,
+				});
+
+				// Verify elicitInput was called
+				expect(mockElicitInput).toHaveBeenCalled();
+
+				// Verify the error was caught and decline was returned
+				expect(elicitationResult).toEqual({ action: "decline" });
+			}
+
+			// Complete the tool call to clean up
+			resolveToolCall();
+		});
+
+		it("should handle cancel action from elicitInput", async () => {
+			mockClient.connect.mockResolvedValue(true);
+			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
+			mockClient.getTools.mockResolvedValue([]);
+			(mockClient as any).isConnected = true;
+
+			await bridge.initialize();
+
+			let resolveToolCall!: () => void;
+			const toolCallPromise = new Promise<void>((resolve) => {
+				resolveToolCall = resolve;
+			});
+
+			mockClient.callTool.mockImplementation(async (): Promise<any> => {
+				await toolCallPromise;
+				return { id: "1", result: { success: true } };
+			});
+
+			const mcpServer = bridge.createServer();
+
+			// Mock elicitInput to return cancel action
+			const mockElicitInput = jest
+				.fn<(params: any) => Promise<{ action: string; content?: Record<string, unknown> }>>()
+				.mockResolvedValue({
+					action: "cancel",
+				});
+			(mcpServer.server as any).elicitInput = mockElicitInput;
+
+			const mockTransport = new MockTransport();
+			mockTransport.sessionId = "test-session-789";
+			await mcpServer.connect(mockTransport);
+
+			const toolCallRequest = {
+				jsonrpc: "2.0" as const,
+				id: 77,
+				method: "tools/call",
+				params: { name: "test_tool", arguments: {} },
+			};
+
+			mockTransport.simulateIncomingMessage(toolCallRequest);
+			await wait(50);
+
+			const capturedCorrelationId = mockClient.callTool.mock.calls[0]?.[2];
+			const onElicitationCallback = mockClient.onElicitation.mock.calls[0]?.[0];
+
+			if (onElicitationCallback) {
+				const elicitationResult = await onElicitationCallback({
+					message: "Confirm action",
+					mode: "form",
+					requestedSchema: { type: "object" },
+					relatedToolCallId: capturedCorrelationId as string,
+				});
+
+				// Verify cancel action is forwarded correctly
+				expect(elicitationResult).toEqual({
+					action: "cancel",
+					content: undefined,
+				});
+			}
+
+			resolveToolCall();
+		});
 	});
 });
 

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as net from "node:net";
 
@@ -56,7 +57,6 @@ export class StreamDeckClient {
 	private onDisconnectedCallback: (() => void) | null = null;
 	private pendingRequests = new Map<string, PendingRequest>();
 	private pollInterval: NodeJS.Timeout | null = null;
-	private requestId = 0;
 	private readonly serverFactory: ServerFactory;
 	private signalServer: net.Server | null = null;
 	private socket: net.Socket | null = null;
@@ -256,6 +256,36 @@ export class StreamDeckClient {
 		this.tryStartSignalServer();
 	}
 
+	/**
+	 * Creates a timeout that rejects a pending request after the specified duration.
+	 * @param requestId - The ID of the request to timeout.
+	 * @param reject - The reject function from the request's promise.
+	 * @param timeoutMs - Timeout duration in milliseconds.
+	 * @returns The timeout handle.
+	 */
+	private createRequestTimeout(requestId: string, reject: (error: Error) => void, timeoutMs: number): NodeJS.Timeout {
+		return setTimeout(() => {
+			this.pendingRequests.delete(requestId);
+			reject(new Error("Request timeout"));
+		}, timeoutMs);
+	}
+
+	/**
+	 * Extends the timeout for a pending request by resetting its timer.
+	 * Used when an elicitation request is received to allow time for user input.
+	 * @param requestId - The ID of the pending request to extend.
+	 * @param timeoutMs - New timeout duration in milliseconds (defaults to ELICITATION_TIMEOUT_MS).
+	 * @returns True if the request was found and extended, false otherwise.
+	 */
+	private extendRequestTimeout(requestId: string, timeoutMs: number = ELICITATION_TIMEOUT_MS): boolean {
+		const pending = this.pendingRequests.get(requestId);
+		if (!pending) return false;
+
+		clearTimeout(pending.timeout);
+		pending.timeout = this.createRequestTimeout(requestId, pending.reject, timeoutMs);
+		return true;
+	}
+
 	private handleClose(): void {
 		this.socket = null;
 		this.buffer = "";
@@ -282,7 +312,7 @@ export class StreamDeckClient {
 		this.buffer += typeof data === "string" ? data : data.toString();
 
 		if (this.buffer.length > MAX_BUFFER_SIZE) {
-			console.error(`CLIENT: Buffer overflow, clearing buffer`);
+			console.error(`${LOG_PREFIX}: Buffer overflow, clearing buffer`);
 			this.buffer = "";
 			return;
 		}
@@ -308,17 +338,27 @@ export class StreamDeckClient {
 
 		let response: ElicitationResponse;
 
-		console.error("CLIENT: Elicitation request received: ", params);
+		console.error(`${LOG_PREFIX}: Elicitation request received: `, params);
+
+		// Extend the timeout for the related tool call while waiting for user input
+		if (params.relatedToolCallId) {
+			const extended = this.extendRequestTimeout(params.relatedToolCallId, ELICITATION_TIMEOUT_MS);
+			if (extended) {
+				console.error(`${LOG_PREFIX}: Extended timeout for related tool call: ${params.relatedToolCallId}`);
+			}
+		}
 
 		if (!this.elicitationCallback) {
 			// No callback registered - decline the request
-			console.error(`CLIENT: No elicitation callback registered, declining request`);
+			console.error(`${LOG_PREFIX}: No elicitation callback registered, declining request`);
 			response = { action: "decline" };
 		} else {
+			// Capture timer ID to ensure cleanup after Promise.race() resolves
+			let timeoutId: NodeJS.Timeout;
 			try {
 				// Create a promise that will timeout after ELICITATION_TIMEOUT_MS
 				const timeoutPromise = new Promise<ElicitationResponse>((_, reject) => {
-					setTimeout(() => {
+					timeoutId = setTimeout(() => {
 						reject(new Error("Elicitation timeout"));
 					}, ELICITATION_TIMEOUT_MS);
 				});
@@ -327,8 +367,11 @@ export class StreamDeckClient {
 				response = await Promise.race([this.elicitationCallback(params), timeoutPromise]);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : "Unknown error";
-				console.error(`CLIENT: Elicitation callback error:`, message);
+				console.error(`${LOG_PREFIX}: Elicitation callback error:`, message);
 				response = { action: "decline" };
+			} finally {
+				// Always clear the timeout to prevent timer accumulation
+				clearTimeout(timeoutId!);
 			}
 		}
 
@@ -422,6 +465,7 @@ export class StreamDeckClient {
 			"method" in obj &&
 			record.method === "elicitation/create" &&
 			"params" in obj &&
+			record.params !== null &&
 			typeof record.params === "object"
 		);
 	}
@@ -545,16 +589,13 @@ export class StreamDeckClient {
 			}
 			id = requestId;
 		} else {
-			id = String(++this.requestId);
+			id = randomUUID();
 		}
 
 		const fullRequest = { ...request, id };
 
 		return new Promise<T>((resolve, reject) => {
-			const timeout = setTimeout(() => {
-				this.pendingRequests.delete(id);
-				reject(new Error("Request timeout"));
-			}, REQUEST_TIMEOUT_MS);
+			const timeout = this.createRequestTimeout(id, reject, REQUEST_TIMEOUT_MS);
 
 			this.pendingRequests.set(id, {
 				resolve: resolve as (response: IpcResponse) => void,

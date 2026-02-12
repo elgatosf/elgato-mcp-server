@@ -112,7 +112,7 @@ The system consists of three main source files:
 - `SIGNAL_SOCKET_PATH`: Signal notification socket path
 - `REQUEST_TIMEOUT`: Request timeout in milliseconds
 - `MAX_BUFFER_SIZE`: Maximum buffer size for IPC messages
-- `ELICITATION_TIMEOUT_MS`: Timeout for elicitation requests (120 seconds)
+- `ELICITATION_TIMEOUT_MS`: Timeout for elicitation requests (300 seconds / 5 minutes)
 - `SDK_NOTIFICATIONS`: Notification type constants for Stream Deck SDK
   - `TOOLS_LIST_CHANGED`: `"notifications/tools/list_changed"`
   - `RESOURCES_LIST_CHANGED`: `"notifications/resources/list_changed"`
@@ -352,6 +352,7 @@ The bridge sends back the user's response:
 ```json
 {
   "id": "9b3908ad-40cf-4d82-96e1-abc123",
+  "method": "elicitation/response",
   "result": {
     "action": "accept",
     "content": { "fieldName": "user value" }
@@ -366,7 +367,17 @@ The bridge sends back the user's response:
 
 #### Elicitation Timeout
 
-Elicitation requests have a 120-second timeout (`ELICITATION_TIMEOUT_MS`). If the MCP client doesn't respond within this time, the bridge returns a `decline` response to Stream Deck.
+Elicitation requests have a 300-second (5-minute) timeout (`ELICITATION_TIMEOUT_MS`). If the MCP client doesn't respond within this time, the bridge returns a `decline` response to Stream Deck.
+
+#### Tool Call Timeout Extension During Elicitation
+
+When a tool call triggers an elicitation request, the standard 30-second request timeout (`REQUEST_TIMEOUT_MS`) would normally expire before the user has a chance to respond. To handle this, the `StreamDeckClient` automatically extends the timeout for the pending tool call when an elicitation request is received:
+
+1. Tool call is sent to Stream Deck with a 30-second timeout
+2. Stream Deck sends back an `elicitation/create` request with `relatedToolCallId` matching the tool call
+3. The client detects the matching pending request and extends its timeout to 5 minutes (`ELICITATION_TIMEOUT_MS`)
+4. User input can now take up to 5 minutes without the tool call timing out
+5. Once the elicitation response is sent back, the tool call completes normally
 
 ### 4.3 Stream Deck IPC Protocol (Internal)
 
@@ -770,7 +781,7 @@ switch (process.platform) {
 |--------|-------------|
 | Quick Connection Timeout | 1 second |
 | Request Timeout | 30 seconds |
-| Elicitation Timeout | 120 seconds |
+| Elicitation Timeout | 300 seconds |
 | Maximum Buffer Size | 1 MB |
 | HTTP Default Port | 9090 |
 
@@ -902,6 +913,7 @@ pnpm lint:fix       # Prettier formatting
    - Test timeout handling (decline after timeout)
    - Test error handling (callback errors, destroyed socket)
    - Test message stream parsing with elicitation, responses, and notifications mixed
+   - Test timeout extension for pending tool calls when elicitation is received
 
 ### 8.2 Integration Testing Requirements
 
@@ -1142,6 +1154,7 @@ interface ElicitationParams {
   message: string;
   mode: "form";
   requestedSchema: Record<string, unknown>;
+  relatedToolCallId: string;
 }
 
 interface ElicitationRequest {
@@ -1246,5 +1259,5 @@ interface Config {
 - Elicitation occurs mid-tool-call when Stream Deck needs additional user input
 - The bridge holds a reference to the active MCP server during tool execution
 - The `elicitInput()` method on the MCP server is used to prompt the user
-- Timeout: 120 seconds (configurable via `ELICITATION_TIMEOUT_MS`)
+- Timeout: 300 seconds (configurable via `ELICITATION_TIMEOUT_MS`)
 - If timeout or error, the bridge returns `{ action: "decline" }` to Stream Deck

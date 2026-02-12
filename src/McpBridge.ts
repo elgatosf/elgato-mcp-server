@@ -403,7 +403,7 @@ export class McpBridge {
 			}
 
 			try {
-				log("Forwarding elicitation to MCP client:", params);
+				log(`Forwarding elicitation to MCP client: ${params}`);
 
 				// Cast the schema - Stream Deck provides a JSON Schema object that matches MCP's expected format
 				const result = await targetMcpServer.server.elicitInput({
@@ -413,7 +413,7 @@ export class McpBridge {
 					requestedSchema: params.requestedSchema as any,
 				});
 
-				log("Elicitation result from MCP client:", result);
+				log(`Elicitation result from MCP client: ${result}`);
 
 				return {
 					action: result.action,

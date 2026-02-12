@@ -24,7 +24,8 @@
         "test:integration": "node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPatterns=integration",
         "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch",
         "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage",
-        "test:ci": "node --experimental-vm-modules node_modules/jest/bin/jest.js --ci --coverage --maxWorkers=2"
+        "test:ci": "node --experimental-vm-modules node_modules/jest/bin/jest.js --ci --coverage --maxWorkers=2",
+        "dev_check": "pnpm build && pnpm lint && pnpm test"
     },
     "author": {
         "name": "Elgato",
