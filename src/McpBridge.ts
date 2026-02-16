@@ -58,6 +58,7 @@ export class McpBridge {
 	 * Closes the bridge and disconnects from Stream Deck.
 	 */
 	public close(): void {
+		this.activeToolCalls.clear();
 		this.client.disconnect();
 	}
 
@@ -235,7 +236,6 @@ export class McpBridge {
 	}
 
 	private registerHandlers(mcpServer: McpServer): void {
-
 		// Access the low-level server for custom request handlers
 		const server = mcpServer.server;
 
@@ -261,9 +261,7 @@ export class McpBridge {
 
 			// Create correlation ID using session ID and request ID
 			// For HTTP mode, sessionId is present; for stdio mode, it's undefined
-			const correlationId = extra.sessionId
-				? `${extra.sessionId}:${extra.requestId}`
-				: String(extra.requestId);
+			const correlationId = extra.sessionId ? `${extra.sessionId}:${extra.requestId}` : String(extra.requestId);
 
 			// Store the McpServer reference for use by the elicitation callback
 			this.activeToolCalls.set(correlationId, mcpServer);

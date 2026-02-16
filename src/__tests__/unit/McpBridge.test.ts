@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, jest } from "@jest/globals";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+
 import { LOG_PREFIX, SDK_NOTIFICATIONS } from "../../constants.js";
 import { createConnectedBridge, createInitializedBridge, McpBridge } from "../../McpBridge.js";
 import type { StreamDeckClient } from "../../StreamDeckClient.js";
-import { createMockResource, createMockServerInfo, createMockTool, wait } from "../helpers/testUtils.js";
 import { MockTransport } from "../helpers/MockTransport.js";
+import { createMockResource, createMockServerInfo, createMockTool, wait } from "../helpers/testUtils.js";
 
 describe("McpBridge", () => {
 	let bridge: McpBridge;
@@ -460,6 +461,100 @@ describe("McpBridge", () => {
 
 			expect(mockClient.disconnect).toHaveBeenCalled();
 		});
+
+		it("should clear activeToolCalls on close", async () => {
+			// Initialize bridge
+			mockClient.connect.mockResolvedValue(true);
+			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
+			mockClient.getTools.mockResolvedValue([]);
+			(mockClient as any).isConnected = true;
+
+			await bridge.initialize();
+
+			// Create a deferred promise to control when callTool resolves
+			let resolveToolCall!: () => void;
+			const toolCallPromise = new Promise<void>((resolve) => {
+				resolveToolCall = resolve;
+			});
+
+			// Make callTool block until we manually resolve it
+			mockClient.callTool.mockImplementation(async (): Promise<any> => {
+				await toolCallPromise;
+				return { id: "1", result: { success: true } };
+			});
+
+			// Create the MCP server and connect a mock transport
+			const mcpServer = bridge.createServer();
+
+			// Create a mock transport and connect
+			const mockTransport = new MockTransport();
+			mockTransport.sessionId = "test-session-456";
+			await mcpServer.connect(mockTransport);
+
+			// Simulate a tools/call request to populate activeToolCalls
+			const toolCallRequest = {
+				jsonrpc: "2.0" as const,
+				id: 99,
+				method: "tools/call",
+				params: { name: "test_tool", arguments: {} },
+			};
+
+			// Trigger the tool call (this will block on our deferred promise)
+			mockTransport.simulateIncomingMessage(toolCallRequest);
+			// Give the handler time to start and register the correlation ID
+			await wait(50);
+
+			// Verify callTool was called and capture the correlation ID
+			expect(mockClient.callTool).toHaveBeenCalled();
+			const capturedCorrelationId = mockClient.callTool.mock.calls[0]?.[2];
+			expect(capturedCorrelationId).toBeDefined();
+
+			// Get the onElicitation callback
+			const onElicitationCallback = mockClient.onElicitation.mock.calls[0]?.[0];
+			expect(onElicitationCallback).toBeDefined();
+
+			// At this point, activeToolCalls should have an entry
+			// Verify elicitation would work before close
+			if (onElicitationCallback) {
+				const mockElicitInput = jest
+					.fn<(params: any) => Promise<{ action: string; content?: Record<string, unknown> }>>()
+					.mockResolvedValue({
+						action: "accept",
+						content: { test: "data" },
+					});
+				(mcpServer.server as any).elicitInput = mockElicitInput;
+
+				const resultBefore = await onElicitationCallback({
+					message: "Test before close",
+					mode: "form",
+					requestedSchema: { type: "object" },
+					relatedToolCallId: capturedCorrelationId as string,
+				});
+
+				// Should forward to MCP server
+				expect(mockElicitInput).toHaveBeenCalled();
+				expect(resultBefore.action).toBe("accept");
+			}
+
+			// Close the bridge
+			bridge.close();
+
+			// Now verify that subsequent elicitation lookups return "decline"
+			if (onElicitationCallback) {
+				const resultAfter = await onElicitationCallback({
+					message: "Test after close",
+					mode: "form",
+					requestedSchema: { type: "object" },
+					relatedToolCallId: capturedCorrelationId as string,
+				});
+
+				// Should decline since activeToolCalls was cleared
+				expect(resultAfter).toEqual({ action: "decline" });
+			}
+
+			// Complete the tool call to clean up
+			resolveToolCall();
+		});
 	});
 
 	describe("isConnected property", () => {
@@ -607,7 +702,8 @@ describe("McpBridge", () => {
 			it("should forward non-tools/changed notifications to onStreamDeckNotification callbacks", async () => {
 				await bridge.initialize();
 
-				const forwardCallback = jest.fn<(method: string, params?: unknown) => Promise<void>>()
+				const forwardCallback = jest
+					.fn<(method: string, params?: unknown) => Promise<void>>()
 					.mockResolvedValue(undefined);
 				bridge.onStreamDeckNotification(forwardCallback);
 
@@ -625,7 +721,8 @@ describe("McpBridge", () => {
 			it("should forward multiple custom notifications correctly", async () => {
 				await bridge.initialize();
 
-				const forwardCallback = jest.fn<(method: string, params?: unknown) => Promise<void>>()
+				const forwardCallback = jest
+					.fn<(method: string, params?: unknown) => Promise<void>>()
 					.mockResolvedValue(undefined);
 				bridge.onStreamDeckNotification(forwardCallback);
 
@@ -646,7 +743,8 @@ describe("McpBridge", () => {
 			it("should not forward tools/changed to onStreamDeckNotification callbacks", async () => {
 				await bridge.initialize();
 
-				const forwardCallback = jest.fn<(method: string, params?: unknown) => Promise<void>>()
+				const forwardCallback = jest
+					.fn<(method: string, params?: unknown) => Promise<void>>()
 					.mockResolvedValue(undefined);
 				bridge.onStreamDeckNotification(forwardCallback);
 
@@ -677,7 +775,8 @@ describe("McpBridge", () => {
 			it("should catch and log errors from forward callbacks", async () => {
 				await bridge.initialize();
 
-				const errorCallback = jest.fn<(method: string, params?: unknown) => Promise<void>>()
+				const errorCallback = jest
+					.fn<(method: string, params?: unknown) => Promise<void>>()
 					.mockRejectedValue(new Error("Forward failed"));
 				bridge.onStreamDeckNotification(errorCallback);
 
@@ -692,19 +791,17 @@ describe("McpBridge", () => {
 				expect(errorCallback).toHaveBeenCalled();
 				// The error should be logged with LOG_PREFIX and "Failed to forward notification:" message
 				// The log() function calls console.error(LOG_PREFIX, ...args)
-				expect(consoleErrorSpy).toHaveBeenCalledWith(
-					LOG_PREFIX,
-					"Failed to forward notification:",
-					expect.any(Error)
-				);
+				expect(consoleErrorSpy).toHaveBeenCalledWith(LOG_PREFIX, "Failed to forward notification:", expect.any(Error));
 			});
 
 			it("should continue invoking remaining forward callbacks after one throws", async () => {
 				await bridge.initialize();
 
-				const errorCallback = jest.fn<(method: string, params?: unknown) => Promise<void>>()
+				const errorCallback = jest
+					.fn<(method: string, params?: unknown) => Promise<void>>()
 					.mockRejectedValue(new Error("First forward failed"));
-				const successCallback = jest.fn<(method: string, params?: unknown) => Promise<void>>()
+				const successCallback = jest
+					.fn<(method: string, params?: unknown) => Promise<void>>()
 					.mockResolvedValue(undefined);
 
 				bridge.onStreamDeckNotification(errorCallback);
@@ -728,12 +825,9 @@ describe("McpBridge", () => {
 			it("should invoke all registered onStreamDeckNotification callbacks", async () => {
 				await bridge.initialize();
 
-				const callback1 = jest.fn<(method: string, params?: unknown) => Promise<void>>()
-					.mockResolvedValue(undefined);
-				const callback2 = jest.fn<(method: string, params?: unknown) => Promise<void>>()
-					.mockResolvedValue(undefined);
-				const callback3 = jest.fn<(method: string, params?: unknown) => Promise<void>>()
-					.mockResolvedValue(undefined);
+				const callback1 = jest.fn<(method: string, params?: unknown) => Promise<void>>().mockResolvedValue(undefined);
+				const callback2 = jest.fn<(method: string, params?: unknown) => Promise<void>>().mockResolvedValue(undefined);
+				const callback3 = jest.fn<(method: string, params?: unknown) => Promise<void>>().mockResolvedValue(undefined);
 
 				bridge.onStreamDeckNotification(callback1);
 				bridge.onStreamDeckNotification(callback2);
@@ -788,7 +882,8 @@ describe("McpBridge", () => {
 			it("should not forward resources/list_changed to onStreamDeckNotification callbacks", async () => {
 				await bridge.initialize();
 
-				const forwardCallback = jest.fn<(method: string, params?: unknown) => Promise<void>>()
+				const forwardCallback = jest
+					.fn<(method: string, params?: unknown) => Promise<void>>()
 					.mockResolvedValue(undefined);
 				bridge.onStreamDeckNotification(forwardCallback);
 
@@ -827,7 +922,8 @@ describe("McpBridge", () => {
 			it("should not forward resources/updated to onStreamDeckNotification callbacks", async () => {
 				await bridge.initialize();
 
-				const forwardCallback = jest.fn<(method: string, params?: unknown) => Promise<void>>()
+				const forwardCallback = jest
+					.fn<(method: string, params?: unknown) => Promise<void>>()
 					.mockResolvedValue(undefined);
 				bridge.onStreamDeckNotification(forwardCallback);
 
@@ -915,7 +1011,7 @@ describe("McpBridge", () => {
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
 				LOG_PREFIX,
 				"Failed to notify resources changed:",
-				expect.any(Error)
+				expect.any(Error),
 			);
 
 			consoleErrorSpy.mockRestore();
@@ -930,7 +1026,9 @@ describe("McpBridge", () => {
 			mockClient.getTools.mockResolvedValue([]);
 			mockClient.getResources.mockResolvedValue([createMockResource({ uri: "streamdeck://test/resource" })]);
 
-			const notificationCallback = jest.fn<(method: string, params?: unknown) => Promise<void>>().mockResolvedValue(undefined);
+			const notificationCallback = jest
+				.fn<(method: string, params?: unknown) => Promise<void>>()
+				.mockResolvedValue(undefined);
 
 			bridge.onStreamDeckNotification(notificationCallback);
 
@@ -945,10 +1043,7 @@ describe("McpBridge", () => {
 			await wait(10);
 
 			// Should NOT be forwarded since not subscribed
-			expect(notificationCallback).not.toHaveBeenCalledWith(
-				SDK_NOTIFICATIONS.RESOURCES_UPDATED,
-				expect.anything()
-			);
+			expect(notificationCallback).not.toHaveBeenCalledWith(SDK_NOTIFICATIONS.RESOURCES_UPDATED, expect.anything());
 		});
 
 		it("should forward RESOURCES_UPDATED notification after subscribing via handler", async () => {
@@ -960,7 +1055,9 @@ describe("McpBridge", () => {
 			mockClient.getTools.mockResolvedValue([]);
 			mockClient.getResources.mockResolvedValue([createMockResource({ uri: "streamdeck://test/subscribed" })]);
 
-			const notificationCallback = jest.fn<(method: string, params?: unknown) => Promise<void>>().mockResolvedValue(undefined);
+			const notificationCallback = jest
+				.fn<(method: string, params?: unknown) => Promise<void>>()
+				.mockResolvedValue(undefined);
 
 			bridge.onStreamDeckNotification(notificationCallback);
 
@@ -990,10 +1087,9 @@ describe("McpBridge", () => {
 			await wait(10);
 
 			// Should be forwarded since subscribed
-			expect(notificationCallback).toHaveBeenCalledWith(
-				SDK_NOTIFICATIONS.RESOURCES_UPDATED,
-				{ uri: "streamdeck://test/subscribed" }
-			);
+			expect(notificationCallback).toHaveBeenCalledWith(SDK_NOTIFICATIONS.RESOURCES_UPDATED, {
+				uri: "streamdeck://test/subscribed",
+			});
 		});
 	});
 
@@ -1348,4 +1444,3 @@ describe("createConnectedBridge", () => {
 		consoleSpy.mockRestore();
 	});
 });
-
