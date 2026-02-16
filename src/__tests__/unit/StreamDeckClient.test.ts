@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
+
+import { RECONNECT_POLL_INTERVAL_MS, REQUEST_TIMEOUT_MS } from "../../constants.js";
 import { StreamDeckClient } from "../../StreamDeckClient.js";
 import type { ElicitationCallback } from "../../types.js";
 import { MockServer } from "../helpers/MockServer.js";
 import { MockSocket } from "../helpers/MockSocket.js";
 import { createMockResource, createMockServerInfo, createMockTool, wait } from "../helpers/testUtils.js";
-import { REQUEST_TIMEOUT_MS, RECONNECT_POLL_INTERVAL_MS } from "../../constants.js";
 
 describe("StreamDeckClient", () => {
 	let client: StreamDeckClient;
@@ -24,7 +25,7 @@ describe("StreamDeckClient", () => {
 					mockServer.on("connection", listener);
 				}
 				return mockServer as any;
-			}
+			},
 		);
 
 		jest.clearAllMocks();
@@ -196,8 +197,12 @@ describe("StreamDeckClient", () => {
 			const req2 = JSON.parse(written[1] ?? "{}");
 
 			// Send responses in reverse order
-			mockSocket.simulateData(JSON.stringify({ id: req2.id, result: { tools: [createMockTool({ name: "tool2" })] } }) + "\n");
-			mockSocket.simulateData(JSON.stringify({ id: req1.id, result: { tools: [createMockTool({ name: "tool1" })] } }) + "\n");
+			mockSocket.simulateData(
+				JSON.stringify({ id: req2.id, result: { tools: [createMockTool({ name: "tool2" })] } }) + "\n",
+			);
+			mockSocket.simulateData(
+				JSON.stringify({ id: req1.id, result: { tools: [createMockTool({ name: "tool1" })] } }) + "\n",
+			);
 
 			const [result1, result2] = await Promise.all([request1Promise, request2Promise]);
 
@@ -620,15 +625,12 @@ describe("StreamDeckClient", () => {
 			};
 
 			// Create client with tracking socket factory
-			const testClient = new StreamDeckClient(
-				trackingSocketFactory,
-				(listener) => {
-					if (listener) {
-						mockServer.on("connection", listener);
-					}
-					return mockServer as any;
+			const testClient = new StreamDeckClient(trackingSocketFactory, (listener) => {
+				if (listener) {
+					mockServer.on("connection", listener);
 				}
-			);
+				return mockServer as any;
+			});
 
 			// Connect first
 			const connectPromise = testClient.connect(100);
@@ -664,15 +666,12 @@ describe("StreamDeckClient", () => {
 			};
 
 			// Create client with tracking socket factory
-			const testClient = new StreamDeckClient(
-				trackingSocketFactory,
-				(listener) => {
-					if (listener) {
-						mockServer.on("connection", listener);
-					}
-					return mockServer as any;
+			const testClient = new StreamDeckClient(trackingSocketFactory, (listener) => {
+				if (listener) {
+					mockServer.on("connection", listener);
 				}
-			);
+				return mockServer as any;
+			});
 
 			// Start signal listener first (client owns signal server)
 			testClient.startSignalListener();
@@ -734,15 +733,12 @@ describe("StreamDeckClient", () => {
 			};
 
 			// Create client with tracking socket factory
-			const testClient = new StreamDeckClient(
-				originalSocketFactory,
-				(listener) => {
-					if (listener) {
-						mockServer.on("connection", listener);
-					}
-					return mockServer as any;
+			const testClient = new StreamDeckClient(originalSocketFactory, (listener) => {
+				if (listener) {
+					mockServer.on("connection", listener);
 				}
-			);
+				return mockServer as any;
+			});
 
 			// Connect and close to start polling
 			const connectPromise = testClient.connect(100);
@@ -775,7 +771,7 @@ describe("StreamDeckClient", () => {
 				() => mockSocket as any,
 				(listener) => {
 					return errorMockServer as any;
-				}
+				},
 			);
 
 			// Start signal listener
@@ -801,6 +797,100 @@ describe("StreamDeckClient", () => {
 			expect(mockServer.isListening()).toBe(true);
 
 			client.disconnect();
+		});
+
+		it("should not start polling when stale socket recovery succeeds", async () => {
+			jest.useFakeTimers();
+
+			// Track how many servers were created (for detecting retries)
+			let serverFactoryCallCount = 0;
+			const trackingServerFactory = (listener: any) => {
+				serverFactoryCallCount++;
+				if (listener) {
+					mockServer.on("connection", listener);
+				}
+				return mockServer as any;
+			};
+
+			// Create client with tracking server factory
+			const testClient = new StreamDeckClient(() => mockSocket as any, trackingServerFactory);
+
+			// Spy on startPolling to verify it's NOT called
+			const startPollingSpy = jest.spyOn(testClient as any, "startPolling");
+
+			// Start signal listener - this is the first server creation
+			testClient.startSignalListener();
+			expect(mockServer.isListening()).toBe(true);
+			const initialServerCount = serverFactoryCallCount;
+
+			// Simulate EADDRINUSE error (stale socket scenario on non-Windows)
+			const error = new Error("EADDRINUSE") as NodeJS.ErrnoException;
+			error.code = "EADDRINUSE";
+			mockServer.emit("error", error);
+
+			// Allow handleSocketInUse() to complete (it's async)
+			await jest.runAllTimersAsync();
+
+			// After stale socket recovery, the signal server should be recreated
+			// (serverFactoryCallCount should be greater than initial)
+			expect(serverFactoryCallCount).toBeGreaterThan(initialServerCount);
+
+			// Polling should NOT have started - verify directly
+			expect(startPollingSpy).not.toHaveBeenCalled();
+
+			testClient.disconnect();
+			jest.useRealTimers();
+		});
+
+		it("should start polling when handleSocketInUse fails", async () => {
+			jest.useFakeTimers();
+			const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+
+			// Create client
+			const testClient = new StreamDeckClient(
+				() => mockSocket as any,
+				(listener) => {
+					if (listener) {
+						mockServer.on("connection", listener);
+					}
+					return mockServer as any;
+				},
+			);
+
+			// Spy on methods
+			const startPollingSpy = jest.spyOn(testClient as any, "startPolling");
+			const handleSocketInUseSpy = jest
+				.spyOn(testClient as any, "handleSocketInUse")
+				.mockRejectedValue(new Error("isSocketActive failed"));
+
+			// Start signal listener
+			testClient.startSignalListener();
+			expect(mockServer.isListening()).toBe(true);
+
+			// Simulate EADDRINUSE error
+			const error = new Error("EADDRINUSE") as NodeJS.ErrnoException;
+			error.code = "EADDRINUSE";
+			mockServer.emit("error", error);
+
+			// Allow the promise chain (.then().catch()) to complete
+			await Promise.resolve();
+			await Promise.resolve();
+
+			// Verify handleSocketInUse was called and failed
+			expect(handleSocketInUseSpy).toHaveBeenCalled();
+
+			// Verify error was logged
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("handleSocketInUse failed:"),
+				expect.any(Error),
+			);
+
+			// Verify polling started as fallback
+			expect(startPollingSpy).toHaveBeenCalled();
+
+			testClient.disconnect();
+			consoleErrorSpy.mockRestore();
+			jest.useRealTimers();
 		});
 	});
 
@@ -947,10 +1037,7 @@ describe("StreamDeckClient", () => {
 				await wait(10);
 
 				expect(errorCallback).toHaveBeenCalled();
-				expect(consoleErrorSpy).toHaveBeenCalledWith(
-					"[MCP Bridge] Notification callback error:",
-					expect.any(Error)
-				);
+				expect(consoleErrorSpy).toHaveBeenCalledWith("[MCP Bridge] Notification callback error:", expect.any(Error));
 
 				consoleErrorSpy.mockRestore();
 			});
@@ -1006,9 +1093,7 @@ describe("StreamDeckClient", () => {
 				const notification2 = { method: "event/after", params: { seq: 2 } };
 
 				mockSocket.simulateData(
-					JSON.stringify(notification1) + "\n" +
-					JSON.stringify(response) + "\n" +
-					JSON.stringify(notification2) + "\n"
+					JSON.stringify(notification1) + "\n" + JSON.stringify(response) + "\n" + JSON.stringify(notification2) + "\n",
 				);
 
 				const result = await requestPromise;
@@ -1066,7 +1151,9 @@ describe("StreamDeckClient", () => {
 
 		describe("type guards", () => {
 			it("should identify elicitation request (has both id and method: elicitation/create)", async () => {
-				const elicitationCallback = jest.fn<ElicitationCallback>().mockResolvedValue({ action: "accept", content: { name: "test" } });
+				const elicitationCallback = jest
+					.fn<ElicitationCallback>()
+					.mockResolvedValue({ action: "accept", content: { name: "test" } });
 				client.onElicitation(elicitationCallback);
 
 				// Send an elicitation request (has both id and method)
@@ -1184,7 +1271,9 @@ describe("StreamDeckClient", () => {
 
 		describe("response handling", () => {
 			it("should send elicitation response back to Stream Deck", async () => {
-				const callback = jest.fn<ElicitationCallback>().mockResolvedValue({ action: "accept", content: { name: "John" } });
+				const callback = jest
+					.fn<ElicitationCallback>()
+					.mockResolvedValue({ action: "accept", content: { name: "John" } });
 				client.onElicitation(callback);
 
 				const elicitationRequest = {
@@ -1286,7 +1375,7 @@ describe("StreamDeckClient", () => {
 				// The actual ELICITATION_TIMEOUT_MS is 5 minutes (300,000 ms).
 				// We use fake timers to advance past this timeout without waiting.
 				const callback = jest.fn<ElicitationCallback>().mockImplementation(
-					() => new Promise(() => {}) // Never resolves
+					() => new Promise(() => {}), // Never resolves
 				);
 				client.onElicitation(callback);
 
@@ -1319,7 +1408,7 @@ describe("StreamDeckClient", () => {
 				expect(parsedResponse.result).toEqual({ action: "decline" });
 				expect(consoleErrorSpy).toHaveBeenCalledWith(
 					expect.stringContaining("Elicitation callback error:"),
-					"Elicitation timeout"
+					"Elicitation timeout",
 				);
 
 				consoleErrorSpy.mockRestore();
@@ -1362,13 +1451,11 @@ describe("StreamDeckClient", () => {
 
 				// Verify the timeout extension was logged
 				expect(consoleErrorSpy).toHaveBeenCalledWith(
-					expect.stringContaining("Extended timeout for related tool call: tool-call-extend-test")
+					expect.stringContaining("Extended timeout for related tool call: tool-call-extend-test"),
 				);
 
 				// Now send the tool call response
-				mockSocket.simulateData(
-					JSON.stringify({ id: "tool-call-extend-test", result: { data: "success" } }) + "\n"
-				);
+				mockSocket.simulateData(JSON.stringify({ id: "tool-call-extend-test", result: { data: "success" } }) + "\n");
 
 				const result = await toolCallPromise;
 				expect(result.result).toEqual({ data: "success" });
@@ -1400,7 +1487,7 @@ describe("StreamDeckClient", () => {
 
 				// Verify the extension log was NOT called (since there's no matching pending request)
 				expect(consoleErrorSpy).not.toHaveBeenCalledWith(
-					expect.stringContaining("Extended timeout for related tool call:")
+					expect.stringContaining("Extended timeout for related tool call:"),
 				);
 
 				consoleErrorSpy.mockRestore();
@@ -1435,9 +1522,7 @@ describe("StreamDeckClient", () => {
 				const response = { id: req.id, result: { tools: [] } };
 
 				mockSocket.simulateData(
-					JSON.stringify(notification) + "\n" +
-					JSON.stringify(elicitation) + "\n" +
-					JSON.stringify(response) + "\n"
+					JSON.stringify(notification) + "\n" + JSON.stringify(elicitation) + "\n" + JSON.stringify(response) + "\n",
 				);
 
 				const result = await requestPromise;
@@ -1460,10 +1545,7 @@ describe("StreamDeckClient", () => {
 
 				await wait(10);
 
-				expect(consoleSpy).toHaveBeenCalledWith(
-					expect.stringContaining("[MCP Bridge]"),
-					expect.any(SyntaxError)
-				);
+				expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("[MCP Bridge]"), expect.any(SyntaxError));
 
 				consoleSpy.mockRestore();
 			});
@@ -1501,7 +1583,7 @@ describe("StreamDeckClient", () => {
 				await wait(100);
 
 				expect(consoleSpy).toHaveBeenCalledWith(
-					expect.stringContaining("[MCP Bridge] Cannot send elicitation response: not connected")
+					expect.stringContaining("[MCP Bridge] Cannot send elicitation response: not connected"),
 				);
 
 				consoleSpy.mockRestore();
@@ -1509,4 +1591,3 @@ describe("StreamDeckClient", () => {
 		});
 	});
 });
-

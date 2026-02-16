@@ -425,7 +425,7 @@ export class StreamDeckClient {
 	 * If stale, removes the socket file and retries binding.
 	 * If active, another process owns it - we don't retry.
 	 */
-	private handleSocketInUse(): void {
+	private async handleSocketInUse(): Promise<void> {
 		// On Windows, named pipes don't leave stale files
 		if (process.platform === "win32") {
 			console.error(`${LOG_PREFIX} Signal socket in use by another process`);
@@ -433,22 +433,21 @@ export class StreamDeckClient {
 		}
 
 		// Check if the socket file exists and has an active listener
-		this.isSocketActive(SIGNAL_SOCKET_PATH).then((isActive) => {
-			if (isActive) {
-				// Another process is actively listening - don't retry
-				console.error(`${LOG_PREFIX} Signal socket in use by another process`);
-			} else {
-				// Socket file is stale - remove it and retry
-				console.error(`${LOG_PREFIX} Removing stale signal socket file`);
-				try {
-					fs.unlinkSync(SIGNAL_SOCKET_PATH);
-				} catch {
-					// File doesn't exist or can't be removed
-				}
-				// Retry binding after removing stale socket
-				this.startSignalListener();
+		const isActive = await this.isSocketActive(SIGNAL_SOCKET_PATH);
+		if (isActive) {
+			// Another process is actively listening - don't retry
+			console.error(`${LOG_PREFIX} Signal socket in use by another process`);
+		} else {
+			// Socket file is stale - remove it and retry
+			console.error(`${LOG_PREFIX} Removing stale signal socket file`);
+			try {
+				fs.unlinkSync(SIGNAL_SOCKET_PATH);
+			} catch {
+				// File doesn't exist or can't be removed
 			}
-		});
+			// Retry binding after removing stale socket
+			this.startSignalListener();
+		}
 	}
 
 	/**
@@ -648,11 +647,20 @@ export class StreamDeckClient {
 				console.error(`${LOG_PREFIX} Signal socket in use by another process, relying on polling`);
 				this.signalServer?.close();
 				this.signalServer = null;
-				this.handleSocketInUse();
-				// Start polling only if handleSocketInUse did not successfully recreate the signal server
-				if (!this.signalServer) {
-					this.startPolling();
-				}
+				void this.handleSocketInUse()
+					.then(() => {
+						// Start polling only if handleSocketInUse did not successfully recreate the signal server
+						if (!this.signalServer) {
+							this.startPolling();
+						}
+					})
+					.catch((err) => {
+						console.error(`${LOG_PREFIX} handleSocketInUse failed:`, err);
+						// Ensure polling starts as ultimate fallback
+						if (!this.signalServer) {
+							this.startPolling();
+						}
+					});
 			}
 		});
 
