@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, jest } from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import { LOG_PREFIX, SDK_NOTIFICATIONS } from "../../constants.js";
@@ -1019,20 +1019,23 @@ describe("McpBridge", () => {
 	});
 
 	describe("resource subscription forwarding", () => {
-		it("should forward RESOURCES_UPDATED notification when subscribed to resource", async () => {
+		it("should not send notification when no server has subscribed to resource", async () => {
+			const { MockTransport } = await import("../helpers/MockTransport.js");
+
 			mockClient.connect.mockResolvedValue(true);
 			(mockClient as any).isConnected = true;
 			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
 			mockClient.getTools.mockResolvedValue([]);
 			mockClient.getResources.mockResolvedValue([createMockResource({ uri: "streamdeck://test/resource" })]);
 
-			const notificationCallback = jest
-				.fn<(method: string, params?: unknown) => Promise<void>>()
-				.mockResolvedValue(undefined);
-
-			bridge.onStreamDeckNotification(notificationCallback);
-
 			await bridge.initialize();
+
+			// Create a server but don't subscribe
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.clearOutgoingMessages();
 
 			// Simulate RESOURCES_UPDATED notification for a non-subscribed resource
 			const onNotificationCallback = mockClient.onNotification.mock.calls[0]?.[0];
@@ -1042,11 +1045,14 @@ describe("McpBridge", () => {
 
 			await wait(10);
 
-			// Should NOT be forwarded since not subscribed
-			expect(notificationCallback).not.toHaveBeenCalledWith(SDK_NOTIFICATIONS.RESOURCES_UPDATED, expect.anything());
+			// Should NOT send any notification since not subscribed
+			const notifications = transport
+				.getOutgoingMessages()
+				.filter((msg) => "method" in msg && msg.method === SDK_NOTIFICATIONS.RESOURCES_UPDATED);
+			expect(notifications).toHaveLength(0);
 		});
 
-		it("should forward RESOURCES_UPDATED notification after subscribing via handler", async () => {
+		it("should send notification only to subscribed server", async () => {
 			const { MockTransport } = await import("../helpers/MockTransport.js");
 
 			mockClient.connect.mockResolvedValue(true);
@@ -1054,12 +1060,6 @@ describe("McpBridge", () => {
 			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
 			mockClient.getTools.mockResolvedValue([]);
 			mockClient.getResources.mockResolvedValue([createMockResource({ uri: "streamdeck://test/subscribed" })]);
-
-			const notificationCallback = jest
-				.fn<(method: string, params?: unknown) => Promise<void>>()
-				.mockResolvedValue(undefined);
-
-			bridge.onStreamDeckNotification(notificationCallback);
 
 			await bridge.initialize();
 
@@ -1078,6 +1078,8 @@ describe("McpBridge", () => {
 			transport.simulateIncomingMessage(subscribeRequest);
 			await transport.waitForOutgoingMessage();
 
+			transport.clearOutgoingMessages();
+
 			// Now simulate RESOURCES_UPDATED notification for the subscribed resource
 			const onNotificationCallback = mockClient.onNotification.mock.calls[0]?.[0];
 			if (onNotificationCallback) {
@@ -1086,10 +1088,208 @@ describe("McpBridge", () => {
 
 			await wait(10);
 
-			// Should be forwarded since subscribed
-			expect(notificationCallback).toHaveBeenCalledWith(SDK_NOTIFICATIONS.RESOURCES_UPDATED, {
-				uri: "streamdeck://test/subscribed",
+			// Should receive notification on the subscribed transport
+			const notifications = transport
+				.getOutgoingMessages()
+				.filter((msg) => "method" in msg && msg.method === SDK_NOTIFICATIONS.RESOURCES_UPDATED);
+			expect(notifications).toHaveLength(1);
+			expect(notifications[0]).toMatchObject({
+				method: SDK_NOTIFICATIONS.RESOURCES_UPDATED,
+				params: { uri: "streamdeck://test/subscribed" },
 			});
+		});
+
+		it("should send notification only to subscribed server, not to unsubscribed servers", async () => {
+			const { MockTransport } = await import("../helpers/MockTransport.js");
+
+			mockClient.connect.mockResolvedValue(true);
+			(mockClient as any).isConnected = true;
+			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
+			mockClient.getTools.mockResolvedValue([]);
+			mockClient.getResources.mockResolvedValue([createMockResource({ uri: "streamdeck://test/resource" })]);
+
+			await bridge.initialize();
+
+			// Create two servers (simulating two HTTP sessions)
+			const serverA = bridge.createServer();
+			const transportA = new MockTransport();
+			await serverA.connect(transportA);
+
+			const serverB = bridge.createServer();
+			const transportB = new MockTransport();
+			await serverB.connect(transportB);
+
+			// Session A subscribes to the resource
+			const subscribeRequest = {
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "resources/subscribe",
+				params: { uri: "streamdeck://test/resource" },
+			};
+			transportA.simulateIncomingMessage(subscribeRequest);
+			await transportA.waitForOutgoingMessage();
+
+			transportA.clearOutgoingMessages();
+			transportB.clearOutgoingMessages();
+
+			// Simulate RESOURCES_UPDATED notification from Stream Deck
+			const onNotificationCallback = mockClient.onNotification.mock.calls[0]?.[0];
+			if (onNotificationCallback) {
+				onNotificationCallback(SDK_NOTIFICATIONS.RESOURCES_UPDATED, { uri: "streamdeck://test/resource" });
+			}
+
+			await wait(10);
+
+			// ServerA should receive notification (subscribed)
+			const notificationsA = transportA
+				.getOutgoingMessages()
+				.filter((msg) => "method" in msg && msg.method === SDK_NOTIFICATIONS.RESOURCES_UPDATED);
+			expect(notificationsA).toHaveLength(1);
+			expect(notificationsA[0]).toMatchObject({
+				method: SDK_NOTIFICATIONS.RESOURCES_UPDATED,
+				params: { uri: "streamdeck://test/resource" },
+			});
+
+			// ServerB should NOT receive notification (not subscribed)
+			const notificationsB = transportB
+				.getOutgoingMessages()
+				.filter((msg) => "method" in msg && msg.method === SDK_NOTIFICATIONS.RESOURCES_UPDATED);
+			expect(notificationsB).toHaveLength(0);
+		});
+
+		it("should send notification to both servers when both subscribe to same URI", async () => {
+			const { MockTransport } = await import("../helpers/MockTransport.js");
+
+			mockClient.connect.mockResolvedValue(true);
+			(mockClient as any).isConnected = true;
+			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
+			mockClient.getTools.mockResolvedValue([]);
+			mockClient.getResources.mockResolvedValue([createMockResource({ uri: "streamdeck://test/shared" })]);
+
+			await bridge.initialize();
+
+			// Create two servers
+			const serverA = bridge.createServer();
+			const transportA = new MockTransport();
+			await serverA.connect(transportA);
+
+			const serverB = bridge.createServer();
+			const transportB = new MockTransport();
+			await serverB.connect(transportB);
+
+			// Both sessions subscribe to the same URI
+			const subscribeRequest = {
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "resources/subscribe",
+				params: { uri: "streamdeck://test/shared" },
+			};
+			transportA.simulateIncomingMessage(subscribeRequest);
+			await transportA.waitForOutgoingMessage();
+
+			transportB.simulateIncomingMessage({ ...subscribeRequest, id: 2 });
+			await transportB.waitForOutgoingMessage();
+
+			transportA.clearOutgoingMessages();
+			transportB.clearOutgoingMessages();
+
+			// Simulate RESOURCES_UPDATED notification from Stream Deck
+			const onNotificationCallback = mockClient.onNotification.mock.calls[0]?.[0];
+			if (onNotificationCallback) {
+				onNotificationCallback(SDK_NOTIFICATIONS.RESOURCES_UPDATED, { uri: "streamdeck://test/shared" });
+			}
+
+			await wait(10);
+
+			// Both servers should receive the notification
+			const notificationsA = transportA
+				.getOutgoingMessages()
+				.filter((msg) => "method" in msg && msg.method === SDK_NOTIFICATIONS.RESOURCES_UPDATED);
+			expect(notificationsA).toHaveLength(1);
+			expect(notificationsA[0]).toMatchObject({
+				method: SDK_NOTIFICATIONS.RESOURCES_UPDATED,
+				params: { uri: "streamdeck://test/shared" },
+			});
+
+			const notificationsB = transportB
+				.getOutgoingMessages()
+				.filter((msg) => "method" in msg && msg.method === SDK_NOTIFICATIONS.RESOURCES_UPDATED);
+			expect(notificationsB).toHaveLength(1);
+			expect(notificationsB[0]).toMatchObject({
+				method: SDK_NOTIFICATIONS.RESOURCES_UPDATED,
+				params: { uri: "streamdeck://test/shared" },
+			});
+		});
+
+		it("should maintain session A subscription after session B unsubscribes from same URI", async () => {
+			const { MockTransport } = await import("../helpers/MockTransport.js");
+
+			mockClient.connect.mockResolvedValue(true);
+			(mockClient as any).isConnected = true;
+			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
+			mockClient.getTools.mockResolvedValue([]);
+			mockClient.getResources.mockResolvedValue([createMockResource({ uri: "streamdeck://test/shared" })]);
+
+			await bridge.initialize();
+
+			// Create two servers
+			const serverA = bridge.createServer();
+			const transportA = new MockTransport();
+			await serverA.connect(transportA);
+
+			const serverB = bridge.createServer();
+			const transportB = new MockTransport();
+			await serverB.connect(transportB);
+
+			// Both sessions subscribe to the same URI
+			const subscribeRequest = {
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "resources/subscribe",
+				params: { uri: "streamdeck://test/shared" },
+			};
+			transportA.simulateIncomingMessage(subscribeRequest);
+			await transportA.waitForOutgoingMessage();
+
+			transportB.simulateIncomingMessage({ ...subscribeRequest, id: 2 });
+			await transportB.waitForOutgoingMessage();
+
+			// Session B unsubscribes
+			const unsubscribeRequest = {
+				jsonrpc: "2.0" as const,
+				id: 3,
+				method: "resources/unsubscribe",
+				params: { uri: "streamdeck://test/shared" },
+			};
+			transportB.simulateIncomingMessage(unsubscribeRequest);
+			await transportB.waitForOutgoingMessage();
+
+			transportA.clearOutgoingMessages();
+			transportB.clearOutgoingMessages();
+
+			// Simulate RESOURCES_UPDATED notification from Stream Deck
+			const onNotificationCallback = mockClient.onNotification.mock.calls[0]?.[0];
+			if (onNotificationCallback) {
+				onNotificationCallback(SDK_NOTIFICATIONS.RESOURCES_UPDATED, { uri: "streamdeck://test/shared" });
+			}
+
+			await wait(10);
+
+			// ServerA should still receive notification (still subscribed)
+			const notificationsA = transportA
+				.getOutgoingMessages()
+				.filter((msg) => "method" in msg && msg.method === SDK_NOTIFICATIONS.RESOURCES_UPDATED);
+			expect(notificationsA).toHaveLength(1);
+			expect(notificationsA[0]).toMatchObject({
+				method: SDK_NOTIFICATIONS.RESOURCES_UPDATED,
+				params: { uri: "streamdeck://test/shared" },
+			});
+
+			// ServerB should NOT receive notification (unsubscribed)
+			const notificationsB = transportB
+				.getOutgoingMessages()
+				.filter((msg) => "method" in msg && msg.method === SDK_NOTIFICATIONS.RESOURCES_UPDATED);
+			expect(notificationsB).toHaveLength(0);
 		});
 	});
 

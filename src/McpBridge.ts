@@ -35,7 +35,7 @@ export class McpBridge {
 	private notificationForwardCallbacks: Array<(method: string, params?: unknown) => Promise<void>> = [];
 	private notifyResourcesChangedCallbacks: Array<() => Promise<void>> = [];
 	private notifyToolsChangedCallbacks: Array<() => Promise<void>> = [];
-	private resourceSubscriptions: Set<string> = new Set();
+	private resourceSubscriptions: Map<McpServer, Set<string>> = new Map();
 	private serverInfo: ServerInfo = DEFAULT_SERVER_INFO;
 
 	/**
@@ -59,6 +59,7 @@ export class McpBridge {
 	 */
 	public close(): void {
 		this.activeToolCalls.clear();
+		this.resourceSubscriptions.clear();
 		this.client.disconnect();
 	}
 
@@ -143,12 +144,21 @@ export class McpBridge {
 	}
 
 	/**
-	 * Forwards a resource updated notification only if the client has subscribed to that resource.
+	 * Forwards a resource updated notification to each server that has subscribed to that resource.
 	 * @param uri - The resource URI that was updated.
 	 */
 	private async forwardResourceUpdatedIfSubscribed(uri: string): Promise<void> {
-		if (this.resourceSubscriptions.has(uri)) {
-			await this.forwardNotification(SDK_NOTIFICATIONS.RESOURCES_UPDATED, { uri });
+		for (const [server, subs] of this.resourceSubscriptions) {
+			if (subs.has(uri)) {
+				try {
+					await server.server.notification({
+						method: SDK_NOTIFICATIONS.RESOURCES_UPDATED,
+						params: { uri },
+					});
+				} catch (error) {
+					log("Failed to send resource update notification:", error);
+				}
+			}
 		}
 	}
 
@@ -343,7 +353,12 @@ export class McpBridge {
 			}
 
 			try {
-				this.resourceSubscriptions.add(uri);
+				let serverSubs = this.resourceSubscriptions.get(mcpServer);
+				if (!serverSubs) {
+					serverSubs = new Set();
+					this.resourceSubscriptions.set(mcpServer, serverSubs);
+				}
+				serverSubs.add(uri);
 				return {};
 			} catch (error) {
 				const message = error instanceof Error ? error.message : "Unknown error";
@@ -359,7 +374,13 @@ export class McpBridge {
 			}
 
 			try {
-				this.resourceSubscriptions.delete(uri);
+				const serverSubs = this.resourceSubscriptions.get(mcpServer);
+				if (serverSubs) {
+					serverSubs.delete(uri);
+					if (serverSubs.size === 0) {
+						this.resourceSubscriptions.delete(mcpServer);
+					}
+				}
 				return {};
 			} catch (error) {
 				const message = error instanceof Error ? error.message : "Unknown error";
