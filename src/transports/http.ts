@@ -6,7 +6,7 @@ import cors from "cors";
 import express, { type Express, type Request, type Response } from "express";
 import type { Server as HttpServer } from "node:http";
 
-import { HTTP_DEFAULT_PORT, MCP_ERROR_CODES, DEFAULT_SESSION_TIMEOUT_MS, CLEANUP_INTERVAL_MS } from "../constants.js";
+import { CLEANUP_INTERVAL_MS, DEFAULT_SESSION_TIMEOUT_MS, HTTP_DEFAULT_PORT, MCP_ERROR_CODES } from "../constants.js";
 import { createInitializedBridge, McpBridge } from "../McpBridge.js";
 import { log } from "../utils.js";
 
@@ -30,10 +30,7 @@ export interface SessionData {
  * @param sessions - Map of active sessions to check
  * @param sessionTimeoutMs - Maximum idle time in milliseconds before cleanup
  */
-export function cleanupIdleSessions(
-	sessions: Map<string, SessionData>,
-	sessionTimeoutMs: number,
-): void {
+export function cleanupIdleSessions(sessions: Map<string, SessionData>, sessionTimeoutMs: number): void {
 	const now = Date.now();
 	for (const [sessionId, session] of sessions) {
 		const idleTime = now - session.lastActivity;
@@ -312,8 +309,9 @@ export async function startHttpTransport(options: HttpTransportOptions = {}): Pr
 		}
 		sessions.clear();
 		bridge.close();
-		httpServer.close();
-		process.exit(0);
+		httpServer.close(() => {
+			process.exit(0);
+		});
 	};
 
 	process.on("SIGINT", cleanup);
