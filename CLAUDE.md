@@ -66,3 +66,6 @@ All feature additions, bug fixes, and refactoring follow a three-phase workflow 
 - Uses `@elgato/eslint-config` and `@elgato/prettier-config`
 - JSDoc required for public methods
 - All `.js` extensions in imports (ESM requirement with NodeNext module resolution)
+
+
+Always use Context7 MCP when I need library/API documentation, code generation, setup or configuration steps without me having to explicitly ask.
