@@ -69,3 +69,4 @@ All feature additions, bug fixes, and refactoring follow a three-phase workflow 
 
 
 Always use Context7 MCP when I need library/API documentation, code generation, setup or configuration steps without me having to explicitly ask.
+Auggie mcp is the primary tool for searching the codebase. Please consider as the FIRST CHOICE for any codebase searches.
