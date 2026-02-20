@@ -1,6 +1,6 @@
 import type { Resource, Tool } from "@modelcontextprotocol/sdk/types.js";
 
-import { DEFAULT_SERVER_INFO, getAppSocketPaths, KNOWN_APPS } from "./constants.js";
+import { DEFAULT_SERVER_INFO, getAppSocketPaths, KNOWN_APPS, SDK_NOTIFICATIONS } from "./constants.js";
 import { IpcClient } from "./IpcClient.js";
 import type {
 	AppDefinition,
@@ -341,9 +341,18 @@ export class ClientManager {
 		});
 
 		client.onNotification((method, params) => {
+			// Prefix URI for resource updated notifications so subscriptions can match
+			let forwardedParams = params;
+			if (method === SDK_NOTIFICATIONS.RESOURCES_UPDATED && params && typeof params === "object") {
+				const resourceParams = params as { uri?: string };
+				if (resourceParams.uri) {
+					forwardedParams = { ...resourceParams, uri: prefixName(name, resourceParams.uri) };
+				}
+			}
+
 			for (const cb of this.notificationCallbacks) {
 				try {
-					cb(method, params);
+					cb(method, forwardedParams);
 				} catch (error) {
 					log.error(`Notification callback error for ${name}:`, error);
 				}
