@@ -94,7 +94,7 @@ export interface Annotations {
 }
 
 /**
- * Tool definition from Stream Deck.
+ * Tool definition from a connected Elgato app.
  */
 export interface McpTool {
 	name: string;
@@ -108,7 +108,7 @@ export interface McpTool {
 }
 
 /**
- * Resource definition from Stream Deck.
+ * Resource definition from a connected Elgato app.
  */
 export interface McpResource {
 	uri: string;
@@ -131,7 +131,7 @@ export interface ResponseBase {
 }
 
 /**
- * Server info from Stream Deck.
+ * Server info from a connected Elgato app.
  */
 export interface ServerInfo {
 	name: string;
@@ -191,8 +191,8 @@ export interface ResourcesListResponse extends ResponseBase {
 }
 
 /**
- * Resources read result from Stream Deck.
- * Note: Stream Deck returns a single resource with `content` (object),
+ * Resources read result from a connected Elgato app.
+ * Note: The IPC protocol returns a single resource with `content` (object),
  * which must be converted to MCP's `contents` array format.
  */
 export interface ResourcesReadResult {
@@ -229,7 +229,7 @@ export interface PendingRequest {
 }
 
 /**
- * Notification from Stream Deck (one-way message without id).
+ * Notification from a connected Elgato app (one-way message without id).
  */
 export interface Notification {
 	method: string;
@@ -237,12 +237,12 @@ export interface Notification {
 }
 
 /**
- * Callback function type for handling notifications from Stream Deck.
+ * Callback function type for handling notifications from a connected Elgato app.
  */
 export type NotificationCallback = (method: string, params?: unknown) => void;
 
 /**
- * Parameters for an elicitation request from Stream Deck.
+ * Parameters for an elicitation request from a connected Elgato app.
  */
 export interface ElicitationParams {
 	message: string;
@@ -253,9 +253,9 @@ export interface ElicitationParams {
 }
 
 /**
- * Elicitation request from Stream Deck.
+ * Elicitation request from a connected Elgato app.
  * Unlike regular notifications, elicitation requests have both an id and a method.
- * The id is used to correlate the response back to Stream Deck.
+ * The id is used to correlate the response back to the originating app.
  */
 export interface ElicitationRequest {
 	id: string;
@@ -275,7 +275,7 @@ export interface ElicitationResponse {
 }
 
 /**
- * Callback function type for handling elicitation requests from Stream Deck.
+ * Callback function type for handling elicitation requests from a connected Elgato app.
  * @param params - The elicitation parameters including the relatedToolCallId for routing.
  * Returns a promise that resolves to the user's response.
  */
