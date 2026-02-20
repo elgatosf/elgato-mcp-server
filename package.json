@@ -1,10 +1,10 @@
 {
-    "name": "@elgato/streamdeck-mcp",
+    "name": "@elgato/mcp-server",
     "version": "0.0.0",
-    "description": "A Model Context Protocol (MCP) server that provides automation capabilities with Stream Deck.",
+    "description": "A Model Context Protocol (MCP) server that bridges AI assistants with Elgato apps.",
     "type": "module",
     "bin": {
-        "mcp-server-streamdeck": "bin/index.js"
+        "elgato-mcp-server": "bin/index.js"
     },
     "exports": {
         "./package.json": "./package.json"
@@ -33,12 +33,12 @@
     },
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/elgatosf/streamdeck-mcp.git"
+        "url": "git+https://github.com/elgatosf/elgato-mcp-server.git"
     },
     "bugs": {
-        "url": "https://github.com/elgatosf/streamdeck-mcp/issues"
+        "url": "https://github.com/elgatosf/elgato-mcp-server/issues"
     },
-    "homepage": "https://github.com/elgatosf/streamdeck-mcp#readme",
+    "homepage": "https://github.com/elgatosf/elgato-mcp-server#readme",
     "license": "MIT",
     "packageManager": "pnpm@10.28.2",
     "prettier": "@elgato/prettier-config",

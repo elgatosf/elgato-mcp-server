@@ -1,35 +1,35 @@
-# Stream Deck MCP Bridge
+# Elgato MCP Server
 
-[![npm version](https://img.shields.io/npm/v/@elgato/streamdeck-mcp.svg)](https://www.npmjs.com/package/@elgato/streamdeck-mcp)
+[![npm version](https://img.shields.io/npm/v/@elgato/mcp-server.svg)](https://www.npmjs.com/package/@elgato/mcp-server)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A Model Context Protocol (MCP) server that bridges AI assistants (like Claude Desktop) with Elgato Stream Deck automation capabilities.
+A Model Context Protocol (MCP) server that bridges AI assistants (like Claude Desktop) with Elgato apps.
 
 ## Overview
 
-The Stream Deck MCP Bridge acts as a protocol bridge between MCP clients and Stream Deck hardware:
+The Elgato MCP Server acts as a protocol bridge between MCP clients and Elgato apps via IPC:
 
 ```
-MCP Client <--MCP Transport--> Bridge <--Unix Socket/Named Pipe--> Stream Deck
+MCP Client <--MCP Transport--> Bridge <--Unix Socket/Named Pipe--> Elgato App
 ```
 
 **Key Features:**
 
-- 🔌 **Dynamic Tool Discovery** — Automatically discovers and exposes Stream Deck tools via MCP
+- 🔌 **Dynamic Tool Discovery** — Automatically discovers and exposes tools from connected Elgato apps via MCP
 - 🚀 **Dual Transport Support** — stdio (for Claude Desktop) and HTTP (for web clients)
 - 🌐 **ngrok Integration** — Optional public tunnel for remote access
-- 🔄 **Hot Reconnection** — Automatically reconnects when Stream Deck becomes available
+- 🔄 **Hot Reconnection** — Automatically reconnects when apps become available
 - 💻 **Cross-Platform** — Supports Windows and macOS
-- 📢 **Notification Forwarding** — Forwards Stream Deck notifications to connected clients
+- 📢 **Notification Forwarding** — Forwards app notifications to connected MCP clients
 
 ## Installation
 
 ```bash
 # Global installation (recommended)
-npm install -g @elgato/streamdeck-mcp
+npm install -g @elgato/mcp-server
 
 # Or with pnpm
-pnpm add -g @elgato/streamdeck-mcp
+pnpm add -g @elgato/mcp-server
 ```
 
 ## Usage
@@ -39,7 +39,7 @@ pnpm add -g @elgato/streamdeck-mcp
 For integration with Claude Desktop or other MCP clients using standard I/O:
 
 ```bash
-mcp-server-streamdeck
+elgato-mcp-server
 ```
 
 ### HTTP Transport
@@ -48,13 +48,13 @@ For web-based clients or remote access:
 
 ```bash
 # Start HTTP server on default port (9090)
-mcp-server-streamdeck --http
+elgato-mcp-server --http
 
 # Custom port
-mcp-server-streamdeck --http --port 3000
+elgato-mcp-server --http --port 3000
 
 # With ngrok tunnel (requires NGROK_AUTHTOKEN env var)
-NGROK_AUTHTOKEN=your_token mcp-server-streamdeck --http --ngrok
+NGROK_AUTHTOKEN=your_token elgato-mcp-server --http --ngrok
 ```
 
 ### CLI Options
@@ -78,8 +78,8 @@ Add the following to your Claude Desktop configuration file:
 ```json
 {
     "mcpServers": {
-        "streamdeck": {
-            "command": "mcp-server-streamdeck"
+        "elgato": {
+            "command": "elgato-mcp-server"
         }
     }
 }
@@ -107,8 +107,8 @@ When running in HTTP mode, the following endpoints are available:
 
 ```bash
 # Clone the repository
-git clone https://github.com/elgatosf/streamdeck-mcp.git
-cd streamdeck-mcp
+git clone https://github.com/elgatosf/elgato-mcp-server.git
+cd elgato-mcp-server
 
 # Install dependencies
 pnpm install
@@ -125,8 +125,8 @@ pnpm start
 | Command                 | Description                         |
 | ----------------------- | ----------------------------------- |
 | `pnpm build`            | Compile TypeScript to JavaScript    |
-| `pnpm start`            | Run the bridge with stdio transport |
-| `pnpm http`             | Run the bridge with HTTP transport  |
+| `pnpm start`            | Run the server with stdio transport |
+| `pnpm http`             | Run the server with HTTP transport  |
 | `pnpm ngrok`            | Run with HTTP + ngrok tunnel        |
 | `pnpm lint`             | Run ESLint                          |
 | `pnpm lint:fix`         | Fix formatting with Prettier        |
@@ -141,7 +141,7 @@ The project includes comprehensive unit and integration tests. For detailed info
 
 ## Architecture
 
-The bridge consists of four main components:
+The server consists of four main components:
 
 1. **IpcClient** — IPC client for communicating with a single app (e.g. Stream Deck) via Unix socket (macOS/Linux) or named pipe (Windows). Handles connection lifecycle, message parsing, and notification forwarding.
 2. **ClientManager** — Manages multiple `IpcClient` instances (one per known app). Aggregates tools and resources with `appname__` prefixes and routes tool calls to the correct client.
@@ -154,9 +154,9 @@ For detailed technical information, see [TECHNICAL_SPECIFICATION.md](./TECHNICAL
 
 ## Requirements
 
-- Stream Deck software with MCP plugin enabled
+- Elgato app with MCP plugin support (e.g. Stream Deck)
 - Node.js 18 or later
-- Supported platforms: Windows, macOS, Linux
+- Supported platforms: Windows, macOS
 
 ## License
 
@@ -166,7 +166,7 @@ See [LICENSE](./LICENSE) for details.
 
 ## Links
 
-- [GitHub Repository](https://github.com/elgatosf/streamdeck-mcp)
-- [npm Package](https://www.npmjs.com/package/@elgato/streamdeck-mcp)
-- [Issue Tracker](https://github.com/elgatosf/streamdeck-mcp/issues)
+- [GitHub Repository](https://github.com/elgatosf/elgato-mcp-server)
+- [npm Package](https://www.npmjs.com/package/@elgato/mcp-server)
+- [Issue Tracker](https://github.com/elgatosf/elgato-mcp-server/issues)
 - [Elgato](https://www.elgato.com)

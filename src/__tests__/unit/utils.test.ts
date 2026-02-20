@@ -303,7 +303,7 @@ describe("utils", () => {
 
 			expect(consoleLogSpy).toHaveBeenCalledTimes(1);
 			const output = consoleLogSpy.mock.calls[0]?.[0] as string;
-			expect(output).toContain("Usage: mcp-server-elgato");
+			expect(output).toContain("Usage: elgato-mcp-server");
 			expect(output).toContain("--transport");
 			expect(output).toContain("--http");
 			expect(output).toContain("--port");

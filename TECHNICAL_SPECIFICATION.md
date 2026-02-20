@@ -1,32 +1,33 @@
-# Stream Deck MCP Bridge - Technical Specification
+# Elgato MCP Server - Technical Specification
 
 ## 1. Project Overview
 
 ### 1.1 Purpose
 
-The Stream Deck MCP Bridge is a TypeScript/Node.js application that acts as a protocol bridge between Model Context Protocol (MCP) clients (such as Claude Desktop) and Elgato Stream Deck hardware automation capabilities. It enables AI assistants to discover and invoke Stream Deck tools through the standardized MCP protocol.
+The Elgato MCP Server is a TypeScript/Node.js application that acts as a protocol bridge between Model Context Protocol (MCP) clients (such as Claude Desktop) and Elgato apps. It enables AI assistants to discover and invoke tools exposed by connected Elgato apps through the standardized MCP protocol.
 
 ### 1.2 Goals
 
-- **Seamless Integration**: Provide a transparent bridge between MCP clients and Stream Deck automation
-- **Dynamic Tool Discovery**: Discover and expose Stream Deck tools at runtime without hardcoding tool definitions
+- **Seamless Integration**: Provide a transparent bridge between MCP clients and Elgato apps
+- **Dynamic Tool Discovery**: Discover and expose app tools at runtime without hardcoding tool definitions
 - **Multi-Transport Support**: Support both stdio (for desktop integration) and HTTP (for web clients) transports
-- **Resilient Operation**: Start and operate independently of Stream Deck availability, with automatic reconnection
+- **Resilient Operation**: Start and operate independently of app availability, with automatic reconnection
 - **Cross-Platform Compatibility**: Support macOS and Windows platforms
 
 ### 1.3 High-Level Architecture
 
 ```
 ┌──────────────────┐     MCP Protocol     ┌──────────────────┐     IPC Socket     ┌──────────────────┐
-│   MCP Client     │◄────────────────────►│  MCP Bridge      │◄──────────────────►│   Stream Deck    │
-│ (Claude Desktop) │   (stdio or HTTP)    │  (This Server)   │  (Unix/Named Pipe) │   (C++ App)      │
-└──────────────────┘                      └──────────────────┘                    └──────────────────┘
+│   MCP Client     │◄────────────────────►│  MCP Server      │◄──────────────────►│  Elgato App      │
+│ (Claude Desktop) │   (stdio or HTTP)    │  (This Server)   │  (Unix/Named Pipe) │   (e.g. Stream   │
+└──────────────────┘                      └──────────────────┘                    │    Deck)         │
+                                                                                   └──────────────────┘
 ```
 
-The bridge operates in proxy mode:
+The server operates in proxy mode:
 
 1. Receives MCP requests from clients via stdio or HTTP transport
-2. Forwards tool calls to Stream Deck via local IPC socket
+2. Forwards tool calls to the relevant Elgato app via local IPC socket
 3. Returns responses back to MCP clients
 
 ---
@@ -557,10 +558,10 @@ Communication with Stream Deck uses JSON messages terminated by newline (`\n`).
 
 ### 4.4 Socket Paths
 
-| Platform | Main Socket                              | Signal Socket                                  |
-| -------- | ---------------------------------------- | ---------------------------------------------- |
-| macOS    | `/tmp/elgato-streamdeck-mcp-bridge.sock` | `/tmp/elgato-streamdeck-mcp-bridge-ready.sock` |
-| Windows  | `\\.\pipe\streamdeck-mcp-bridge`         | `\\.\pipe\streamdeck-mcp-bridge-ready`         |
+| Platform | Main Socket                       | Signal Socket                           |
+| -------- | --------------------------------- | --------------------------------------- |
+| macOS    | `/tmp/elgato-mcp-streamdeck.sock` | `/tmp/elgato-mcp-streamdeck-ready.sock` |
+| Windows  | `\\.\pipe\elgato-mcp-streamdeck`  | `\\.\pipe\elgato-mcp-streamdeck-ready`  |
 
 ---
 
@@ -866,7 +867,7 @@ switch (process.platform) {
 ### 7.1 Code Structure
 
 ```
-streamdeck-mcp/
+elgato-mcp-server/
 ├── src/
 │   ├── index.ts              # Main entry point
 │   ├── McpBridge.ts          # MCP server and tool management
@@ -929,7 +930,7 @@ pnpm lint:fix       # Prettier formatting
 {
     "type": "module", // ESM module format
     "bin": {
-        "mcp-server-streamdeck": "bin/index.js"
+        "elgato-mcp-server": "bin/index.js"
     },
     "files": ["bin/"], // Published files
     "exports": {
@@ -1025,7 +1026,7 @@ curl http://localhost:9090/health
 
 ### 9.1 Distribution
 
-The package is published as `@elgato/streamdeck-mcp` to npm registry.
+The package is published as `@elgato/mcp-server` to npm registry.
 
 **Published Files:**
 
@@ -1043,10 +1044,10 @@ The package is published as `@elgato/streamdeck-mcp` to npm registry.
 
 ```bash
 # Global installation
-npm install -g @elgato/streamdeck-mcp
+npm install -g @elgato/mcp-server
 
 # Local installation
-npm install @elgato/streamdeck-mcp
+npm install @elgato/mcp-server
 ```
 
 ### 9.3 Configuration
@@ -1056,8 +1057,8 @@ npm install @elgato/streamdeck-mcp
 ```json
 {
     "mcpServers": {
-        "streamdeck": {
-            "command": "mcp-server-streamdeck",
+        "elgato": {
+            "command": "elgato-mcp-server",
             "args": []
         }
     }
@@ -1067,7 +1068,7 @@ npm install @elgato/streamdeck-mcp
 ### 9.4 Command-Line Interface
 
 ```
-Usage: mcp-server-streamdeck [options]
+Usage: elgato-mcp-server [options]
 
 Options:
   --transport <mode>  Transport mode: 'stdio' (default) or 'http'

@@ -28,7 +28,7 @@ export const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 export const KNOWN_APPS: AppDefinition[] = [
 	{
 		name: "streamdeck",
-		socketBaseName: "elgato-streamdeck-mcp-bridge",
+		socketBaseName: "elgato-mcp-streamdeck",
 	},
 ];
 

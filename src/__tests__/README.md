@@ -1,6 +1,6 @@
-# Stream Deck MCP Bridge - Test Suite
+# Elgato MCP Server - Test Suite
 
-This directory contains comprehensive test coverage for the Stream Deck MCP Bridge project.
+This directory contains comprehensive test coverage for the Elgato MCP Server project.
 
 ## Current Status
 

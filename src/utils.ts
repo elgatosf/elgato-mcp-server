@@ -127,7 +127,7 @@ export function parseCliArgs(args: string[]): CliOptions {
  */
 export function printHelp(): void {
 	console.log(`
-Usage: mcp-server-elgato [options]
+Usage: elgato-mcp-server [options]
 
 Options:
   --transport <mode>  Transport mode: 'stdio' (default) or 'http'

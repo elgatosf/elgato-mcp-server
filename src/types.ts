@@ -1,7 +1,7 @@
 /**
- * Stream Deck MCP Bridge - Type Definitions
+ * Elgato MCP Server - Type Definitions
  *
- * Protocol types for communication between MCP clients and Stream Deck IPC.
+ * Protocol types for communication between MCP clients and Elgato app IPC.
  */
 
 /**

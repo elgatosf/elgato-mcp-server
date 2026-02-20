@@ -10,7 +10,7 @@ describe("constants", () => {
 				expect.arrayContaining([
 					expect.objectContaining({
 						name: "streamdeck",
-						socketBaseName: "elgato-streamdeck-mcp-bridge",
+						socketBaseName: "elgato-mcp-streamdeck",
 					}),
 				]),
 			);
