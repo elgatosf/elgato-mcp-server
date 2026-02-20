@@ -256,32 +256,10 @@ describe("McpBridge", () => {
 		});
 
 		describe("tools/list_changed notification", () => {
-			it("should call notifyToolsChanged when tools/list_changed notification is received", async () => {
-				const toolsChangedCallback = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
-				bridge.onToolsChanged(toolsChangedCallback);
-
-				if (onNotificationCallback) {
-					onNotificationCallback(SDK_NOTIFICATIONS.TOOLS_LIST_CHANGED, undefined);
-				}
-
-				await wait(10);
-				expect(toolsChangedCallback).toHaveBeenCalled();
-			});
-
-			it("should invoke all registered onToolsChanged callbacks on tools/list_changed", async () => {
-				const callback1 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
-				const callback2 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
-				bridge.onToolsChanged(callback1);
-				bridge.onToolsChanged(callback2);
-
-				if (onNotificationCallback) {
-					onNotificationCallback(SDK_NOTIFICATIONS.TOOLS_LIST_CHANGED, undefined);
-				}
-
-				await wait(10);
-				expect(callback1).toHaveBeenCalled();
-				expect(callback2).toHaveBeenCalled();
-			});
+			// Note: TOOLS_LIST_CHANGED is now handled by ClientManager which calls refreshAll()
+			// before triggering onToolsChanged. McpBridge receives onToolsChanged callback
+			// from ClientManager and forwards to its own callbacks. If this notification
+			// reaches McpBridge via onNotification, it should be a no-op (not forwarded).
 
 			it("should not forward tools/list_changed to onClientNotification callbacks", async () => {
 				const forwardCallback = jest
@@ -299,17 +277,10 @@ describe("McpBridge", () => {
 		});
 
 		describe("resources/list_changed notification", () => {
-			it("should call notifyResourcesChanged when resources/list_changed is received", async () => {
-				const resourcesChangedCallback = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
-				bridge.onResourcesChanged(resourcesChangedCallback);
-
-				if (onNotificationCallback) {
-					onNotificationCallback(SDK_NOTIFICATIONS.RESOURCES_LIST_CHANGED, undefined);
-				}
-
-				await wait(10);
-				expect(resourcesChangedCallback).toHaveBeenCalled();
-			});
+			// Note: RESOURCES_LIST_CHANGED is now handled by ClientManager which calls refreshAll()
+			// before triggering onResourcesChanged. McpBridge receives onResourcesChanged callback
+			// from ClientManager and forwards to its own callbacks. If this notification
+			// reaches McpBridge via onNotification, it should be a no-op (not forwarded).
 
 			it("should not forward resources/list_changed to onClientNotification callbacks", async () => {
 				const forwardCallback = jest

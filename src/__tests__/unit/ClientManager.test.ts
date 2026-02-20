@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals
 
 import { ClientManager } from "../../ClientManager.js";
 import type { IpcClientFactory } from "../../ClientManager.js";
+import { SDK_NOTIFICATIONS } from "../../constants.js";
 import type { CallToolResponse, ClientManagerConfig, IpcClientConfig, ResourcesReadResult } from "../../types.js";
 import { createMockClient, createMockResource, createMockServerInfo, createMockTool } from "../helpers/testUtils.js";
 
@@ -540,6 +541,230 @@ describe("ClientManager", () => {
 			(notificationCallback as any)?.("some/notification", { data: 42 });
 
 			expect(notifyCb).toHaveBeenCalledWith("some/notification", { data: 42 });
+			mgr.close();
+		});
+
+		it("should NOT forward TOOLS_LIST_CHANGED notifications to onNotification callbacks", async () => {
+			const mockClient = createMockClient();
+			let notificationCallback: ((...args: unknown[]) => unknown) | null = null;
+			mockClient.onNotification.mockImplementation((cb: any) => {
+				notificationCallback = cb;
+			});
+			mockClient.connect.mockResolvedValue(false);
+			mockClient.getTools.mockResolvedValue([]);
+			mockClient.getResources.mockResolvedValue([]);
+
+			const config: ClientManagerConfig = { apps: [{ name: "app", socketBaseName: "app" }] };
+			const mgr = new ClientManager(config, () => mockClient as any);
+
+			const notifyCb = jest.fn();
+			mgr.onNotification(notifyCb);
+
+			await (notificationCallback as any)?.(SDK_NOTIFICATIONS.TOOLS_LIST_CHANGED, undefined);
+
+			expect(notifyCb).not.toHaveBeenCalled();
+			mgr.close();
+		});
+
+		it("should NOT forward RESOURCES_LIST_CHANGED notifications to onNotification callbacks", async () => {
+			const mockClient = createMockClient();
+			let notificationCallback: ((...args: unknown[]) => unknown) | null = null;
+			mockClient.onNotification.mockImplementation((cb: any) => {
+				notificationCallback = cb;
+			});
+			mockClient.connect.mockResolvedValue(false);
+			mockClient.getTools.mockResolvedValue([]);
+			mockClient.getResources.mockResolvedValue([]);
+
+			const config: ClientManagerConfig = { apps: [{ name: "app", socketBaseName: "app" }] };
+			const mgr = new ClientManager(config, () => mockClient as any);
+
+			const notifyCb = jest.fn();
+			mgr.onNotification(notifyCb);
+
+			await (notificationCallback as any)?.(SDK_NOTIFICATIONS.RESOURCES_LIST_CHANGED, undefined);
+
+			expect(notifyCb).not.toHaveBeenCalled();
+			mgr.close();
+		});
+
+		it("should refresh cache and trigger onToolsChanged when TOOLS_LIST_CHANGED is received", async () => {
+			const mockClient = createMockClient({ isConnected: true });
+			let notificationCallback: ((...args: unknown[]) => unknown) | null = null;
+			mockClient.onNotification.mockImplementation((cb: any) => {
+				notificationCallback = cb;
+			});
+			mockClient.connect.mockResolvedValue(true);
+			mockClient.getTools.mockResolvedValue([{ name: "tool1", description: "A tool", inputSchema: {} }]);
+			mockClient.getResources.mockResolvedValue([]);
+
+			const config: ClientManagerConfig = { apps: [{ name: "app", socketBaseName: "app" }] };
+			const mgr = new ClientManager(config, () => mockClient as any);
+			await mgr.initialize();
+
+			// Clear call count from initialize
+			mockClient.getTools.mockClear();
+
+			const toolsChangedCb = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			mgr.onToolsChanged(toolsChangedCb);
+
+			// Simulate SDK sending TOOLS_LIST_CHANGED
+			await (notificationCallback as any)?.(SDK_NOTIFICATIONS.TOOLS_LIST_CHANGED, undefined);
+
+			// Should have refreshed the cache (called getTools again)
+			expect(mockClient.getTools).toHaveBeenCalled();
+			// Should have triggered onToolsChanged callback
+			expect(toolsChangedCb).toHaveBeenCalled();
+			mgr.close();
+		});
+
+		it("should refresh cache and trigger onResourcesChanged when RESOURCES_LIST_CHANGED is received", async () => {
+			const mockClient = createMockClient({ isConnected: true });
+			let notificationCallback: ((...args: unknown[]) => unknown) | null = null;
+			mockClient.onNotification.mockImplementation((cb: any) => {
+				notificationCallback = cb;
+			});
+			mockClient.connect.mockResolvedValue(true);
+			mockClient.getTools.mockResolvedValue([]);
+			mockClient.getResources.mockResolvedValue([{ uri: "file://test", name: "test" }]);
+
+			const config: ClientManagerConfig = { apps: [{ name: "app", socketBaseName: "app" }] };
+			const mgr = new ClientManager(config, () => mockClient as any);
+			await mgr.initialize();
+
+			// Clear call count from initialize
+			mockClient.getResources.mockClear();
+
+			const resourcesChangedCb = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			mgr.onResourcesChanged(resourcesChangedCb);
+
+			// Simulate SDK sending RESOURCES_LIST_CHANGED
+			await (notificationCallback as any)?.(SDK_NOTIFICATIONS.RESOURCES_LIST_CHANGED, undefined);
+
+			// Should have refreshed the cache (called getResources again)
+			expect(mockClient.getResources).toHaveBeenCalled();
+			// Should have triggered onResourcesChanged callback
+			expect(resourcesChangedCb).toHaveBeenCalled();
+			mgr.close();
+		});
+
+		it("should prefix URI in RESOURCES_UPDATED notifications before forwarding", async () => {
+			const mockClient = createMockClient();
+			let notificationCallback: ((...args: unknown[]) => unknown) | null = null;
+			mockClient.onNotification.mockImplementation((cb: any) => {
+				notificationCallback = cb;
+			});
+			mockClient.connect.mockResolvedValue(false);
+
+			const config: ClientManagerConfig = { apps: [{ name: "myapp", socketBaseName: "myapp" }] };
+			const mgr = new ClientManager(config, () => mockClient as any);
+
+			const notifyCb = jest.fn();
+			mgr.onNotification(notifyCb);
+
+			// Simulate SDK sending RESOURCES_UPDATED with an unprefixed URI
+			await (notificationCallback as any)?.(SDK_NOTIFICATIONS.RESOURCES_UPDATED, { uri: "device://status" });
+
+			// Should forward with prefixed URI
+			expect(notifyCb).toHaveBeenCalledWith(SDK_NOTIFICATIONS.RESOURCES_UPDATED, {
+				uri: "myapp__device://status",
+			});
+			mgr.close();
+		});
+
+		it("should preserve other properties when prefixing URI in RESOURCES_UPDATED notifications", async () => {
+			const mockClient = createMockClient();
+			let notificationCallback: ((...args: unknown[]) => unknown) | null = null;
+			mockClient.onNotification.mockImplementation((cb: any) => {
+				notificationCallback = cb;
+			});
+			mockClient.connect.mockResolvedValue(false);
+
+			const config: ClientManagerConfig = { apps: [{ name: "app1", socketBaseName: "app1" }] };
+			const mgr = new ClientManager(config, () => mockClient as any);
+
+			const notifyCb = jest.fn();
+			mgr.onNotification(notifyCb);
+
+			// Simulate SDK sending RESOURCES_UPDATED with additional properties
+			await (notificationCallback as any)?.(SDK_NOTIFICATIONS.RESOURCES_UPDATED, {
+				uri: "file://config.json",
+				extra: "data",
+				timestamp: 12345,
+			});
+
+			// Should forward with prefixed URI and preserve other properties
+			expect(notifyCb).toHaveBeenCalledWith(SDK_NOTIFICATIONS.RESOURCES_UPDATED, {
+				uri: "app1__file://config.json",
+				extra: "data",
+				timestamp: 12345,
+			});
+			mgr.close();
+		});
+
+		it("should forward RESOURCES_UPDATED notifications unchanged when params is undefined", async () => {
+			const mockClient = createMockClient();
+			let notificationCallback: ((...args: unknown[]) => unknown) | null = null;
+			mockClient.onNotification.mockImplementation((cb: any) => {
+				notificationCallback = cb;
+			});
+			mockClient.connect.mockResolvedValue(false);
+
+			const config: ClientManagerConfig = { apps: [{ name: "app", socketBaseName: "app" }] };
+			const mgr = new ClientManager(config, () => mockClient as any);
+
+			const notifyCb = jest.fn();
+			mgr.onNotification(notifyCb);
+
+			// Simulate SDK sending RESOURCES_UPDATED without params
+			await (notificationCallback as any)?.(SDK_NOTIFICATIONS.RESOURCES_UPDATED, undefined);
+
+			// Should forward with undefined params
+			expect(notifyCb).toHaveBeenCalledWith(SDK_NOTIFICATIONS.RESOURCES_UPDATED, undefined);
+			mgr.close();
+		});
+
+		it("should forward RESOURCES_UPDATED notifications unchanged when params has no uri property", async () => {
+			const mockClient = createMockClient();
+			let notificationCallback: ((...args: unknown[]) => unknown) | null = null;
+			mockClient.onNotification.mockImplementation((cb: any) => {
+				notificationCallback = cb;
+			});
+			mockClient.connect.mockResolvedValue(false);
+
+			const config: ClientManagerConfig = { apps: [{ name: "app", socketBaseName: "app" }] };
+			const mgr = new ClientManager(config, () => mockClient as any);
+
+			const notifyCb = jest.fn();
+			mgr.onNotification(notifyCb);
+
+			// Simulate SDK sending RESOURCES_UPDATED with params but no uri
+			await (notificationCallback as any)?.(SDK_NOTIFICATIONS.RESOURCES_UPDATED, { other: "data" });
+
+			// Should forward unchanged
+			expect(notifyCb).toHaveBeenCalledWith(SDK_NOTIFICATIONS.RESOURCES_UPDATED, { other: "data" });
+			mgr.close();
+		});
+
+		it("should forward RESOURCES_UPDATED notifications unchanged when uri is empty string", async () => {
+			const mockClient = createMockClient();
+			let notificationCallback: ((...args: unknown[]) => unknown) | null = null;
+			mockClient.onNotification.mockImplementation((cb: any) => {
+				notificationCallback = cb;
+			});
+			mockClient.connect.mockResolvedValue(false);
+
+			const config: ClientManagerConfig = { apps: [{ name: "app", socketBaseName: "app" }] };
+			const mgr = new ClientManager(config, () => mockClient as any);
+
+			const notifyCb = jest.fn();
+			mgr.onNotification(notifyCb);
+
+			// Simulate SDK sending RESOURCES_UPDATED with empty uri
+			await (notificationCallback as any)?.(SDK_NOTIFICATIONS.RESOURCES_UPDATED, { uri: "" });
+
+			// Should forward unchanged (empty string is falsy)
+			expect(notifyCb).toHaveBeenCalledWith(SDK_NOTIFICATIONS.RESOURCES_UPDATED, { uri: "" });
 			mgr.close();
 		});
 

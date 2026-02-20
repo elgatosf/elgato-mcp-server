@@ -8,17 +8,17 @@ This directory contains comprehensive test coverage for the Elgato MCP Server pr
 | ----------- | ------------------------- |
 | Build       | ✅ Passing                |
 | Test Suites | 12 of 12 passing (100%)   |
-| Tests       | 288 of 288 passing (100%) |
+| Tests       | 294 of 294 passing (100%) |
 | Skipped     | 0 tests                   |
 
 ### Coverage Metrics
 
 | Metric     | Coverage | Threshold |
 | ---------- | -------- | --------- |
-| Statements | 88.00%   | 80% ✅    |
-| Branches   | 80.65%   | 80% ✅    |
-| Functions  | 90.78%   | 80% ✅    |
-| Lines      | 88.50%   | 80% ✅    |
+| Statements | 87.33%   | 80% ✅    |
+| Branches   | 81.25%   | 80% ✅    |
+| Functions  | 90.25%   | 80% ✅    |
+| Lines      | 87.73%   | 80% ✅    |
 
 ## Test Structure
 
@@ -30,11 +30,11 @@ src/__tests__/
 │   ├── MockServer.ts                     # Mock implementation of net.Server
 │   ├── MockTransport.ts                  # Mock implementation of MCP Transport
 │   └── testUtils.ts                      # Helper functions for creating test data
-├── unit/                                 # Unit tests (8 test files, 227 tests)
+├── unit/                                 # Unit tests (8 test files, 232 tests)
 │   ├── constants.test.ts                 # Socket path generation tests (14 tests)
 │   ├── utils.test.ts                     # Utility functions tests (53 tests)
 │   ├── IpcClient.test.ts                 # IPC client tests (65 tests, includes elicitation)
-│   ├── ClientManager.test.ts             # Client manager aggregation tests (33 tests)
+│   ├── ClientManager.test.ts             # Client manager aggregation tests (42 tests)
 │   ├── McpBridge.test.ts                 # MCP bridge logic tests (72 tests, includes elicitation)
 │   ├── http-server-startup.test.ts       # HTTP server initialization tests (4 tests)
 │   └── http-session-timeout.test.ts      # HTTP session timeout tests (6 tests)
@@ -96,13 +96,14 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Resources API (getResources, readResource)
 - Elicitation handling (type guard, callback registration, response handling, timeout, error handling)
 
-#### ClientManager.test.ts (33 tests)
+#### ClientManager.test.ts (42 tests)
 
 - Multi-client aggregation of tools and resources
 - `appname__` prefix application and stripping
 - Routing of tool calls to the correct IpcClient
 - Forwarding of onToolsChanged / onResourcesChanged / onNotification / onElicitation callbacks
 - Handling connected/disconnected client states
+- URI prefixing in RESOURCES_UPDATED notifications for subscription matching
 
 #### McpBridge.test.ts (72 tests)
 

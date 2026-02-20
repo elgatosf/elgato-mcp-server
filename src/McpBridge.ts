@@ -152,11 +152,12 @@ export class McpBridge {
 		log.debug(`Received notification from client: ${method}`, params);
 
 		switch (method) {
+			// TOOLS_LIST_CHANGED and RESOURCES_LIST_CHANGED are handled by ClientManager
+			// with refresh-then-notify pattern. No action needed here since ClientManager
+			// triggers onToolsChanged/onResourcesChanged callbacks after refreshing cache.
 			case SDK_NOTIFICATIONS.TOOLS_LIST_CHANGED:
-				await this.notifyToolsChanged();
-				break;
 			case SDK_NOTIFICATIONS.RESOURCES_LIST_CHANGED:
-				await this.notifyResourcesChanged();
+				// Handled by ClientManager - no action needed
 				break;
 			case SDK_NOTIFICATIONS.RESOURCES_UPDATED: {
 				const resourceParams = params as { uri: string } | undefined;

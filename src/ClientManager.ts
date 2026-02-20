@@ -340,7 +340,20 @@ export class ClientManager {
 			}
 		});
 
-		client.onNotification((method, params) => {
+		client.onNotification(async (method, params) => {
+			// Handle list-changed notifications with refresh-then-notify pattern
+			// This ensures cached data is fresh before MCP clients are notified
+			if (method === SDK_NOTIFICATIONS.TOOLS_LIST_CHANGED) {
+				await this.refreshAll();
+				await this.notifyToolsChanged();
+				return;
+			}
+			if (method === SDK_NOTIFICATIONS.RESOURCES_LIST_CHANGED) {
+				await this.refreshAll();
+				await this.notifyResourcesChanged();
+				return;
+			}
+
 			// Prefix URI for resource updated notifications so subscriptions can match
 			let forwardedParams = params;
 			if (method === SDK_NOTIFICATIONS.RESOURCES_UPDATED && params && typeof params === "object") {
