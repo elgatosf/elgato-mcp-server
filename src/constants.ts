@@ -1,4 +1,4 @@
-import type { ServerInfo } from "./types.js";
+import type { AppDefinition, ServerInfo } from "./types.js";
 
 const SOCKET_BASE_NAME = "elgato-streamdeck-mcp-bridge";
 
@@ -46,9 +46,39 @@ export const DEFAULT_SESSION_TIMEOUT_MS = 60 * 60 * 1000;
 /** Cleanup interval: check for idle sessions every 5 minutes */
 export const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 
-/** Default server info when Stream Deck is not connected. */
+/** Known apps that the bridge can connect to. Add entries here to support new apps. */
+export const KNOWN_APPS: AppDefinition[] = [
+	{
+		name: "streamdeck",
+		socketBaseName: "elgato-streamdeck-mcp-bridge",
+	},
+];
+
+/** Separator used when prefixing tool/resource names with the app name. */
+export const TOOL_PREFIX_SEPARATOR = "__";
+
+/**
+ * Derives platform-specific socket paths from an app definition.
+ * @param app - The app definition containing the socket base name.
+ * @returns Object with `socketPath` and `signalSocketPath` for the current platform.
+ */
+export function getAppSocketPaths(app: AppDefinition): { signalSocketPath: string; socketPath: string } {
+	const { socketBaseName } = app;
+	if (process.platform === "win32") {
+		return {
+			signalSocketPath: `\\\\.\\pipe\\${socketBaseName}-ready`,
+			socketPath: `\\\\.\\pipe\\${socketBaseName}`,
+		};
+	}
+	return {
+		signalSocketPath: `/tmp/${socketBaseName}-ready.sock`,
+		socketPath: `/tmp/${socketBaseName}.sock`,
+	};
+}
+
+/** Default server info when no apps are connected. */
 export const DEFAULT_SERVER_INFO: ServerInfo = {
-	name: "Stream Deck MCP Server",
+	name: "Elgato MCP Server",
 	version: "1.0.0",
 };
 
