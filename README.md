@@ -66,7 +66,7 @@ Options:
   --port <number>     HTTP server port (default: 9090)
   --ngrok             Enable ngrok tunnel (requires NGROK_AUTHTOKEN env var)
   --help, -h          Show help message
-  --verbose, -v       Enable info/debug logging (errors and warnings always output)
+  --verbose, -v       Enable verbose logging (default: silent)
 ```
 
 ### Logging
@@ -101,73 +101,23 @@ When running in HTTP mode, the following endpoints are available:
 | `/mcp`    | DELETE | Close session                          |
 | `/health` | GET    | Health check endpoint                  |
 
-## Development
-
-### Prerequisites
-
-- Node.js 18+
-- pnpm 10+
-
-### Setup
-
-```bash
-# Clone the repository
-git clone https://github.com/elgatosf/elgato-mcp-server.git
-cd elgato-mcp-server
-
-# Install dependencies
-pnpm install
-
-# Build
-pnpm build
-
-# Run locally
-pnpm start
-```
-
-### Scripts
-
-| Command                 | Description                         |
-| ----------------------- | ----------------------------------- |
-| `pnpm build`            | Compile TypeScript to JavaScript    |
-| `pnpm start`            | Run the server with stdio transport |
-| `pnpm http`             | Run the server with HTTP transport  |
-| `pnpm ngrok`            | Run with HTTP + ngrok tunnel        |
-| `pnpm lint`             | Run ESLint                          |
-| `pnpm lint:fix`         | Fix formatting with Prettier        |
-| `pnpm test`             | Run all tests                       |
-| `pnpm test:unit`        | Run unit tests only                 |
-| `pnpm test:integration` | Run integration tests only          |
-| `pnpm test:coverage`    | Run tests with coverage report      |
-
-### Testing
-
-The project includes comprehensive unit and integration tests. For detailed information about the test suite, see [Test Documentation](./src/__tests__/README.md).
-
-## Architecture
-
-The server consists of four main components:
-
-1. **IpcClient** — IPC client for communicating with a single app (e.g. Stream Deck) via Unix socket (macOS/Linux) or named pipe (Windows). Handles connection lifecycle, message parsing, and notification forwarding.
-2. **ClientManager** — Manages multiple `IpcClient` instances (one per known app). Aggregates tools and resources with `appname__` prefixes and routes tool calls to the correct client.
-3. **McpBridge** — Protocol translator between MCP and the `ClientManager`. Provides two initialization patterns:
-    - `createInitializedBridge()` — For manual transport management (HTTP with multiple sessions)
-    - `createConnectedBridge()` — For single transport scenarios (stdio)
-4. **Transport Layer** — stdio or HTTP transport for MCP client communication
-
-For detailed technical information, see [TECHNICAL_SPECIFICATION.md](./TECHNICAL_SPECIFICATION.md).
-
 ## Requirements
 
 - Elgato app with MCP plugin support (e.g. Stream Deck)
 - Node.js 18 or later
 - Supported platforms: Windows, macOS
 
+## Contributing
+
+We welcome contributions! For development setup, coding guidelines, and the contribution process, see [CONTRIBUTING.md](https://github.com/elgatosf/elgato-mcp-server/blob/main/CONTRIBUTING.md).
+
+For detailed technical documentation and architecture information, see [TECHNICAL_SPECIFICATION.md](https://github.com/elgatosf/elgato-mcp-server/blob/main/TECHNICAL_SPECIFICATION.md).
+
 ## License
 
 MIT License - Copyright (c) Corsair Memory Inc.
 
-See [LICENSE](./LICENSE) for details.
+See [LICENSE](https://github.com/elgatosf/elgato-mcp-server/blob/main/LICENSE) for details.
 
 ## Links
 

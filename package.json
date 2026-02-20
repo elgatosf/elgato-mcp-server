@@ -1,6 +1,6 @@
 {
     "name": "@elgato/mcp-server",
-    "version": "0.0.0",
+    "version": "0.1.0",
     "description": "A Model Context Protocol (MCP) server that bridges AI assistants with Elgato apps.",
     "type": "module",
     "bin": {
@@ -43,6 +43,9 @@
     "license": "MIT",
     "packageManager": "pnpm@10.28.2",
     "prettier": "@elgato/prettier-config",
+    "engines": {
+        "node": ">=18.0.0"
+    },
     "dependencies": {
         "@modelcontextprotocol/sdk": "^1.26.0",
         "@ngrok/ngrok": "^1.7.0",
@@ -64,5 +67,14 @@
         "ts-jest": "^29.4.6",
         "ts-node": "^10.9.2",
         "typescript": "^5.9.3"
-    }
+    },
+    "keywords": [
+        "mcp",
+        "model-context-protocol",
+        "elgato",
+        "stream-deck",
+        "ai",
+        "claude",
+        "automation"
+    ]
 }
