@@ -1,4 +1,17 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { createRequire } from "module";
+
 import type { AppDefinition, ServerInfo } from "./types.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
+const pkg = require("../package.json") as { version: string };
+
+/** Elgato logo SVG read from the shared assets folder. */
+const ELGATO_ICON_SVG_LIGHT = readFileSync(join(__dirname, "..", "assets", "elgato.svg"), "utf-8");
+const ELGATO_ICON_SVG_DARK = readFileSync(join(__dirname, "..", "assets", "elgato_white.svg"), "utf-8");
 
 /** Timeout for quick connection attempts (ms). */
 export const QUICK_CONNECT_TIMEOUT_MS = 1000;
@@ -57,7 +70,19 @@ export function getAppSocketPaths(app: AppDefinition): { signalSocketPath: strin
 /** Default server info when no apps are connected. */
 export const DEFAULT_SERVER_INFO: ServerInfo = {
 	name: "Elgato MCP Server",
-	version: "1.0.0",
+	version: pkg.version,
+	icons: [
+		{
+			src: `data:image/svg+xml,${encodeURIComponent(ELGATO_ICON_SVG_LIGHT)}`,
+			mimeType: "image/svg+xml",
+			theme: "light",
+		},
+		{
+			src: `data:image/svg+xml,${encodeURIComponent(ELGATO_ICON_SVG_DARK)}`,
+			mimeType: "image/svg+xml",
+			theme: "dark",
+		},
+	],
 };
 
 /** Log message prefix. */

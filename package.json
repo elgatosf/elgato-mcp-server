@@ -10,7 +10,8 @@
         "./package.json": "./package.json"
     },
     "files": [
-        "bin/"
+        "bin/",
+        "assets/"
     ],
     "scripts": {
         "build": "tsc",
