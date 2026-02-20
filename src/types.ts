@@ -304,6 +304,7 @@ export interface CliOptions {
 	port: number;
 	ngrok: boolean;
 	help: boolean;
+	verbose: boolean;
 }
 
 /**

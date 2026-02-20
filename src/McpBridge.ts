@@ -89,9 +89,9 @@ export class McpBridge {
 	 * Initializes the bridge by connecting all managed clients.
 	 */
 	public async initialize(): Promise<void> {
-		log("Initializing MCP Bridge...");
+		log.info("Initializing MCP Bridge...");
 		await this.clientManager.initialize();
-		log("MCP Bridge initialized.");
+		log.info("MCP Bridge initialized.");
 	}
 
 	/**
@@ -124,7 +124,7 @@ export class McpBridge {
 			try {
 				await callback(method, params);
 			} catch (error) {
-				log("Failed to forward notification:", error);
+				log.error("Failed to forward notification:", error);
 			}
 		}
 	}
@@ -142,14 +142,14 @@ export class McpBridge {
 						params: { uri },
 					});
 				} catch (error) {
-					log("Failed to send resource update notification:", error);
+					log.error("Failed to send resource update notification:", error);
 				}
 			}
 		}
 	}
 
 	private async handleClientNotification(method: string, params?: unknown): Promise<void> {
-		log(`Received notification from client: ${method}`, params);
+		log.debug(`Received notification from client: ${method}`, params);
 
 		switch (method) {
 			case SDK_NOTIFICATIONS.TOOLS_LIST_CHANGED:
@@ -177,7 +177,7 @@ export class McpBridge {
 			try {
 				await callback();
 			} catch (error) {
-				log("Failed to notify resources changed:", error);
+				log.error("Failed to notify resources changed:", error);
 			}
 		}
 	}
@@ -187,7 +187,7 @@ export class McpBridge {
 			try {
 				await callback();
 			} catch (error) {
-				log("Failed to notify tools changed:", error);
+				log.error("Failed to notify tools changed:", error);
 			}
 		}
 	}
@@ -350,12 +350,12 @@ export class McpBridge {
 			// Look up the correct MCP server using the correlation ID
 			const targetMcpServer = this.activeToolCalls.get(relatedToolCallId);
 			if (!targetMcpServer) {
-				log(`No active MCP server found for tool call ${relatedToolCallId}, declining`);
+				log.warn(`No active MCP server found for tool call ${relatedToolCallId}, declining`);
 				return { action: "decline" };
 			}
 
 			try {
-				log(`Forwarding elicitation to MCP client: ${params}`);
+				log.debug(`Forwarding elicitation to MCP client: ${params}`);
 
 				// Cast the schema - connected app provides a JSON Schema object that matches MCP's expected format
 				const result = await targetMcpServer.server.elicitInput({
@@ -365,7 +365,7 @@ export class McpBridge {
 					requestedSchema: params.requestedSchema as any,
 				});
 
-				log(`Elicitation result from MCP client: ${result}`);
+				log.debug(`Elicitation result from MCP client: ${result}`);
 
 				return {
 					action: result.action,
@@ -373,7 +373,7 @@ export class McpBridge {
 				};
 			} catch (error) {
 				const message = error instanceof Error ? error.message : "Unknown error";
-				log("Failed to forward elicitation to MCP client:", message);
+				log.error("Failed to forward elicitation to MCP client:", message);
 				return { action: "decline" };
 			}
 		});
@@ -407,7 +407,7 @@ export async function createConnectedBridge(transport: Transport): Promise<McpBr
 		try {
 			await mcpServer.sendToolListChanged();
 		} catch (error) {
-			log("Failed to send tools changed notification:", error);
+			log.error("Failed to send tools changed notification:", error);
 		}
 	});
 
@@ -415,7 +415,7 @@ export async function createConnectedBridge(transport: Transport): Promise<McpBr
 		try {
 			await mcpServer.sendResourceListChanged();
 		} catch (error) {
-			log("Failed to send resources changed notification:", error);
+			log.error("Failed to send resources changed notification:", error);
 		}
 	});
 
@@ -427,7 +427,7 @@ export async function createConnectedBridge(transport: Transport): Promise<McpBr
 				params: params as Record<string, unknown> | undefined,
 			});
 		} catch (error) {
-			log("Failed to forward client notification:", error);
+			log.error("Failed to forward client notification:", error);
 		}
 	});
 

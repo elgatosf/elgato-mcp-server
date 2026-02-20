@@ -10,7 +10,7 @@ export async function startStdioTransport(): Promise<void> {
 	const transport = new StdioServerTransport();
 	const bridge = await createConnectedBridge(transport);
 
-	log("MCP Bridge started with stdio transport");
+	log.info("MCP Bridge started with stdio transport");
 
 	process.on("SIGINT", () => {
 		bridge.close();

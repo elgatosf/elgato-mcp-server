@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
 import type { Express } from "express";
 import type { Server as HttpServer } from "node:http";
+
 import { MockMcpBridge } from "../helpers/MockMcpBridge.js";
 import { createDeferred } from "../helpers/testUtils.js";
 
@@ -64,16 +65,24 @@ describe("HTTP server startup error handling", () => {
 		logMock.mockClear();
 
 		jest.unstable_mockModule("../../utils.js", () => ({
-			log: logMock,
+			log: {
+				error: logMock,
+				warn: logMock,
+				info: logMock,
+				debug: logMock,
+			},
 		}));
 		jest.unstable_mockModule("../../McpBridge.js", () => ({
 			McpBridge: MockMcpBridge,
 			createInitializedBridge: jest.fn<() => Promise<MockMcpBridge>>().mockResolvedValue(new MockMcpBridge()),
 		}));
 		jest.unstable_mockModule("express", () => ({
-			default: Object.assign(jest.fn(() => mockExpressApp), {
-				json: jest.fn(() => "json-middleware"),
-			}),
+			default: Object.assign(
+				jest.fn(() => mockExpressApp),
+				{
+					json: jest.fn(() => "json-middleware"),
+				},
+			),
 		}));
 
 		return await import("../../transports/http.js");
@@ -96,42 +105,58 @@ describe("HTTP server startup error handling", () => {
 		expect(mockServer.close).not.toHaveBeenCalled();
 	};
 
-	it("should reject with descriptive message for EADDRINUSE", async () => {
-		await expectStartupError(
-			"EADDRINUSE",
-			"Port 4567 is already in use. Please choose a different port or stop the process using port 4567.",
-		);
-	}, TEST_TIMEOUT_MS);
+	it(
+		"should reject with descriptive message for EADDRINUSE",
+		async () => {
+			await expectStartupError(
+				"EADDRINUSE",
+				"Port 4567 is already in use. Please choose a different port or stop the process using port 4567.",
+			);
+		},
+		TEST_TIMEOUT_MS,
+	);
 
-	it("should reject with descriptive message for EACCES", async () => {
-		await expectStartupError(
-			"EACCES",
-			"Permission denied to bind to port 4567. Try using a port number above 1024 or run with elevated privileges.",
-		);
-	}, TEST_TIMEOUT_MS);
+	it(
+		"should reject with descriptive message for EACCES",
+		async () => {
+			await expectStartupError(
+				"EACCES",
+				"Permission denied to bind to port 4567. Try using a port number above 1024 or run with elevated privileges.",
+			);
+		},
+		TEST_TIMEOUT_MS,
+	);
 
-	it("should reject with descriptive message for EADDRNOTAVAIL", async () => {
-		await expectStartupError(
-			"EADDRNOTAVAIL",
-			"Address not available for port 4567. The requested address is not valid for this machine.",
-		);
-	}, TEST_TIMEOUT_MS);
+	it(
+		"should reject with descriptive message for EADDRNOTAVAIL",
+		async () => {
+			await expectStartupError(
+				"EADDRNOTAVAIL",
+				"Address not available for port 4567. The requested address is not valid for this machine.",
+			);
+		},
+		TEST_TIMEOUT_MS,
+	);
 
-	it("should reject with descriptive message for generic errors", async () => {
-		const { mockApp, mockServer, serverReady } = createStartupHarness();
-		const httpModule = await setupModule();
-		const startPromise = httpModule.startHttpTransport({ port: 7890 });
-		await serverReady.promise;
+	it(
+		"should reject with descriptive message for generic errors",
+		async () => {
+			const { mockApp, mockServer, serverReady } = createStartupHarness();
+			const httpModule = await setupModule();
+			const startPromise = httpModule.startHttpTransport({ port: 7890 });
+			await serverReady.promise;
 
-		mockServer.emitError({ code: "EOTHER", message: "Unexpected error" } as NodeJS.ErrnoException);
+			mockServer.emitError({ code: "EOTHER", message: "Unexpected error" } as NodeJS.ErrnoException);
 
-		const expectedMessage = "Failed to start HTTP server on port 7890: Unexpected error";
-		await expect(startPromise).rejects.toThrow(expectedMessage);
-		expect(expectedMessage).toContain("7890");
-		expect(logMock).toHaveBeenCalledWith(`HTTP server error: ${expectedMessage}`);
-		expect((mockApp as any).listen).toHaveBeenCalledWith(7890, expect.any(Function));
-		expect(mockServer.on).toHaveBeenCalledWith("error", expect.any(Function));
-		expect(typeof mockServer.close).toBe("function");
-		expect(mockServer.close).not.toHaveBeenCalled();
-	}, TEST_TIMEOUT_MS);
+			const expectedMessage = "Failed to start HTTP server on port 7890: Unexpected error";
+			await expect(startPromise).rejects.toThrow(expectedMessage);
+			expect(expectedMessage).toContain("7890");
+			expect(logMock).toHaveBeenCalledWith(`HTTP server error: ${expectedMessage}`);
+			expect((mockApp as any).listen).toHaveBeenCalledWith(7890, expect.any(Function));
+			expect(mockServer.on).toHaveBeenCalledWith("error", expect.any(Function));
+			expect(typeof mockServer.close).toBe("function");
+			expect(mockServer.close).not.toHaveBeenCalled();
+		},
+		TEST_TIMEOUT_MS,
+	);
 });

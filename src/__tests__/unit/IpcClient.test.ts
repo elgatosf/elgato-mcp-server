@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, jest } from "@jest/globals";
 
 import { RECONNECT_POLL_INTERVAL_MS, REQUEST_TIMEOUT_MS } from "../../constants.js";
 import { IpcClient } from "../../IpcClient.js";
 import type { ElicitationCallback, IpcClientConfig } from "../../types.js";
+import { setVerbose } from "../../utils.js";
 import { MockServer } from "../helpers/MockServer.js";
 import { MockSocket } from "../helpers/MockSocket.js";
 import { createMockResource, createMockServerInfo, createMockTool, wait } from "../helpers/testUtils.js";
@@ -17,6 +18,11 @@ describe("IpcClient", () => {
 	let client: IpcClient;
 	let mockSocket: MockSocket;
 	let mockServer: MockServer;
+	let consoleErrorSpy: ReturnType<typeof jest.spyOn>;
+
+	beforeAll(() => {
+		consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+	});
 
 	beforeEach(() => {
 		mockSocket = new MockSocket();
@@ -36,6 +42,15 @@ describe("IpcClient", () => {
 		);
 
 		jest.clearAllMocks();
+		consoleErrorSpy.mockClear();
+	});
+
+	afterEach(() => {
+		setVerbose(false);
+	});
+
+	afterAll(() => {
+		consoleErrorSpy.mockRestore();
 	});
 
 	afterEach(() => {
@@ -774,7 +789,8 @@ describe("IpcClient", () => {
 			// Create a custom mock server that simulates EADDRINUSE
 			const errorMockServer = new MockServer();
 
-			const testClient = new IpcClient(testConfig, 
+			const testClient = new IpcClient(
+				testConfig,
 				() => mockSocket as any,
 				(listener) => {
 					return errorMockServer as any;
@@ -851,10 +867,10 @@ describe("IpcClient", () => {
 
 		it("should start polling when handleSocketInUse fails", async () => {
 			jest.useFakeTimers();
-			const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
 
 			// Create client
-			const testClient = new IpcClient(testConfig, 
+			const testClient = new IpcClient(
+				testConfig,
 				() => mockSocket as any,
 				(listener) => {
 					if (listener) {
@@ -888,7 +904,9 @@ describe("IpcClient", () => {
 
 			// Verify error was logged
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
-				expect.stringContaining("handleSocketInUse failed:"),
+				"[MCP Bridge]",
+				"ERROR:",
+				"handleSocketInUse failed:",
 				expect.any(Error),
 			);
 
@@ -896,7 +914,6 @@ describe("IpcClient", () => {
 			expect(startPollingSpy).toHaveBeenCalled();
 
 			testClient.disconnect();
-			consoleErrorSpy.mockRestore();
 			jest.useRealTimers();
 		});
 	});
@@ -1031,8 +1048,6 @@ describe("IpcClient", () => {
 
 		describe("error isolation", () => {
 			it("should catch and log errors from throwing callbacks", async () => {
-				const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
-
 				const errorCallback = jest.fn(() => {
 					throw new Error("Callback failed");
 				});
@@ -1044,14 +1059,15 @@ describe("IpcClient", () => {
 				await wait(10);
 
 				expect(errorCallback).toHaveBeenCalled();
-				expect(consoleErrorSpy).toHaveBeenCalledWith("[MCP Bridge] Notification callback error:", expect.any(Error));
-
-				consoleErrorSpy.mockRestore();
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"[MCP Bridge]",
+					"ERROR:",
+					"Notification callback error:",
+					expect.any(Error),
+				);
 			});
 
 			it("should continue invoking remaining callbacks after one throws", async () => {
-				const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
-
 				const callback1 = jest.fn(() => {
 					throw new Error("First callback failed");
 				});
@@ -1079,8 +1095,6 @@ describe("IpcClient", () => {
 
 				// Two errors should be logged
 				expect(consoleErrorSpy).toHaveBeenCalledTimes(2);
-
-				consoleErrorSpy.mockRestore();
 			});
 		});
 
@@ -1339,8 +1353,6 @@ describe("IpcClient", () => {
 			});
 
 			it("should send decline response when callback throws error", async () => {
-				const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
-
 				const callback = jest.fn<ElicitationCallback>().mockRejectedValue(new Error("Callback failed"));
 				client.onElicitation(callback);
 
@@ -1368,15 +1380,12 @@ describe("IpcClient", () => {
 				const parsedResponse = JSON.parse(response!);
 				expect(parsedResponse.result).toEqual({ action: "decline" });
 				expect(consoleErrorSpy).toHaveBeenCalled();
-
-				consoleErrorSpy.mockRestore();
 			});
 		});
 
 		describe("timeout handling", () => {
 			it("should send decline response when callback times out", async () => {
 				jest.useFakeTimers();
-				const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
 
 				// Create a callback that never resolves, forcing the Promise.race timeout to trigger.
 				// The actual ELICITATION_TIMEOUT_MS is 5 minutes (300,000 ms).
@@ -1414,16 +1423,17 @@ describe("IpcClient", () => {
 				const parsedResponse = JSON.parse(response!);
 				expect(parsedResponse.result).toEqual({ action: "decline" });
 				expect(consoleErrorSpy).toHaveBeenCalledWith(
-					expect.stringContaining("Elicitation callback error:"),
+					"[MCP Bridge]",
+					"ERROR:",
+					"Elicitation callback error:",
 					"Elicitation timeout",
 				);
 
-				consoleErrorSpy.mockRestore();
 				jest.useRealTimers();
 			});
 
 			it("should extend timeout for pending tool call when elicitation is received", async () => {
-				const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+				setVerbose(true);
 
 				// Register elicitation callback that resolves quickly
 				const elicitationCallback = jest.fn<ElicitationCallback>().mockResolvedValue({
@@ -1458,7 +1468,9 @@ describe("IpcClient", () => {
 
 				// Verify the timeout extension was logged
 				expect(consoleErrorSpy).toHaveBeenCalledWith(
-					expect.stringContaining("Extended timeout for related tool call: tool-call-extend-test"),
+					"[MCP Bridge]",
+					"DEBUG:",
+					"Extended timeout for related tool call: tool-call-extend-test",
 				);
 
 				// Now send the tool call response
@@ -1466,12 +1478,10 @@ describe("IpcClient", () => {
 
 				const result = await toolCallPromise;
 				expect(result.result).toEqual({ data: "success" });
-
-				consoleErrorSpy.mockRestore();
 			});
 
 			it("should not log extension when relatedToolCallId does not match any pending request", async () => {
-				const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+				setVerbose(true);
 
 				// Register elicitation callback
 				const elicitationCallback = jest.fn<ElicitationCallback>().mockResolvedValue({ action: "accept" });
@@ -1494,10 +1504,10 @@ describe("IpcClient", () => {
 
 				// Verify the extension log was NOT called (since there's no matching pending request)
 				expect(consoleErrorSpy).not.toHaveBeenCalledWith(
-					expect.stringContaining("Extended timeout for related tool call:"),
+					"[MCP Bridge]",
+					"DEBUG:",
+					expect.stringContaining("Extended timeout for related tool call"),
 				);
-
-				consoleErrorSpy.mockRestore();
 			});
 		});
 
@@ -1544,22 +1554,21 @@ describe("IpcClient", () => {
 
 		describe("error handling", () => {
 			it("should log error when receiving invalid JSON message", async () => {
-				const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
-
 				// Client is already connected via beforeEach
 				// Send invalid JSON
 				mockSocket.simulateData("not valid json\n");
 
 				await wait(10);
 
-				expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("[MCP Bridge]"), expect.any(SyntaxError));
-
-				consoleSpy.mockRestore();
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"[MCP Bridge]",
+					"ERROR:",
+					"Failed to parse message:",
+					expect.any(SyntaxError),
+				);
 			});
 
 			it("should log error when sending elicitation response with destroyed socket", async () => {
-				const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
-
 				// Client is already connected via beforeEach
 				// Register callback that returns after delay
 				const elicitationCallback = jest.fn<ElicitationCallback>().mockImplementation(async () => {
@@ -1589,11 +1598,11 @@ describe("IpcClient", () => {
 				// Wait for callback to complete
 				await wait(100);
 
-				expect(consoleSpy).toHaveBeenCalledWith(
-					expect.stringContaining("[MCP Bridge] Cannot send elicitation response: not connected"),
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"[MCP Bridge]",
+					"ERROR:",
+					"Cannot send elicitation response: not connected",
 				);
-
-				consoleSpy.mockRestore();
 			});
 		});
 	});

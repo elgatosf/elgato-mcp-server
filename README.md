@@ -66,7 +66,12 @@ Options:
   --port <number>     HTTP server port (default: 9090)
   --ngrok             Enable ngrok tunnel (requires NGROK_AUTHTOKEN env var)
   --help, -h          Show help message
+  --verbose, -v       Enable info/debug logging (errors and warnings always output)
 ```
+
+### Logging
+
+Logs are written to stderr with a severity label (`ERROR`, `WARN`, `INFO`, `DEBUG`). Errors and warnings always output; info/debug require `--verbose`.
 
 ## Claude Desktop Configuration
 

@@ -4,7 +4,6 @@ import * as net from "node:net";
 
 import {
 	ELICITATION_TIMEOUT_MS,
-	LOG_PREFIX,
 	MAX_BUFFER_SIZE,
 	QUICK_CONNECT_TIMEOUT_MS,
 	RECONNECT_POLL_INTERVAL_MS,
@@ -34,6 +33,7 @@ import type {
 	ToolsListRequest,
 	ToolsListResponse,
 } from "./types.js";
+import { log } from "./utils.js";
 
 /**
  * Factory function type for creating sockets.
@@ -316,7 +316,7 @@ export class IpcClient {
 		this.buffer += typeof data === "string" ? data : data.toString();
 
 		if (this.buffer.length > MAX_BUFFER_SIZE) {
-			console.error(`${LOG_PREFIX}: Buffer overflow, clearing buffer`);
+			log.error("Buffer overflow, clearing buffer");
 			this.buffer = "";
 			return;
 		}
@@ -342,19 +342,19 @@ export class IpcClient {
 
 		let response: ElicitationResponse;
 
-		console.error(`${LOG_PREFIX}: Elicitation request received: `, params);
+		log.debug("Elicitation request received:", params);
 
 		// Extend the timeout for the related tool call while waiting for user input
 		if (params.relatedToolCallId) {
 			const extended = this.extendRequestTimeout(params.relatedToolCallId, ELICITATION_TIMEOUT_MS);
 			if (extended) {
-				console.error(`${LOG_PREFIX}: Extended timeout for related tool call: ${params.relatedToolCallId}`);
+				log.debug(`Extended timeout for related tool call: ${params.relatedToolCallId}`);
 			}
 		}
 
 		if (!this.elicitationCallback) {
 			// No callback registered - decline the request
-			console.error(`${LOG_PREFIX}: No elicitation callback registered, declining request`);
+			log.warn("No elicitation callback registered, declining request");
 			response = { action: "decline" };
 		} else {
 			// Capture timer ID to ensure cleanup after Promise.race() resolves
@@ -371,7 +371,7 @@ export class IpcClient {
 				response = await Promise.race([this.elicitationCallback(params), timeoutPromise]);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : "Unknown error";
-				console.error(`${LOG_PREFIX}: Elicitation callback error:`, message);
+				log.error("Elicitation callback error:", message);
 				response = { action: "decline" };
 			} finally {
 				// Always clear the timeout to prevent timer accumulation
@@ -384,7 +384,7 @@ export class IpcClient {
 	}
 
 	private handleError(error: Error): void {
-		console.error(`${LOG_PREFIX} Socket error:`, error.message);
+		log.error("Socket error:", error.message);
 	}
 
 	/**
@@ -397,7 +397,7 @@ export class IpcClient {
 			try {
 				callback(notification.method, notification.params);
 			} catch (callbackError) {
-				console.error(`${LOG_PREFIX} Notification callback error:`, callbackError);
+				log.error("Notification callback error:", callbackError);
 			}
 		}
 	}
@@ -432,7 +432,7 @@ export class IpcClient {
 	private async handleSocketInUse(): Promise<void> {
 		// On Windows, named pipes don't leave stale files
 		if (process.platform === "win32") {
-			console.error(`${LOG_PREFIX} Signal socket in use by another process`);
+			log.warn("Signal socket in use by another process");
 			return;
 		}
 
@@ -440,10 +440,10 @@ export class IpcClient {
 		const isActive = await this.isSocketActive(this.config.signalSocketPath);
 		if (isActive) {
 			// Another process is actively listening - don't retry
-			console.error(`${LOG_PREFIX} Signal socket in use by another process`);
+			log.warn("Signal socket in use by another process");
 		} else {
 			// Socket file is stale - remove it and retry
-			console.error(`${LOG_PREFIX} Removing stale signal socket file`);
+			log.info("Removing stale signal socket file");
 			try {
 				fs.unlinkSync(this.config.signalSocketPath);
 			} catch {
@@ -552,7 +552,7 @@ export class IpcClient {
 				this.handleNotification(parsed);
 			}
 		} catch (error) {
-			console.error(`${LOG_PREFIX} Failed to parse message:`, error);
+			log.error("Failed to parse message:", error);
 		}
 	}
 
@@ -564,7 +564,7 @@ export class IpcClient {
 	 */
 	private sendElicitationResponse(id: string, response: ElicitationResponse): void {
 		if (!this.socket || this.socket.destroyed) {
-			console.error(`${LOG_PREFIX} Cannot send elicitation response: not connected`);
+			log.error("Cannot send elicitation response: not connected");
 			return;
 		}
 
@@ -587,7 +587,7 @@ export class IpcClient {
 		if (requestId !== undefined) {
 			// Check for collision with existing pending request
 			if (this.pendingRequests.has(requestId)) {
-				console.error(`${LOG_PREFIX} Request ID collision: ${requestId} is already pending, cancelling request`);
+				log.error(`Request ID collision: ${requestId} is already pending, cancelling request`);
 				throw new Error(`Request ID collision: ${requestId} is already pending`);
 			}
 			id = requestId;
@@ -640,15 +640,16 @@ export class IpcClient {
 		if (this.signalServer) return;
 
 		this.signalServer = this.serverFactory((connection) => {
-			console.error(`${LOG_PREFIX} Received ready signal from ${this.config.name}`);
+			log.info(`Received ready signal from ${this.config.name}`);
 			connection.end();
 			void this.handleReadySignal();
 		});
 
 		this.signalServer.on("error", (error: NodeJS.ErrnoException) => {
+			if (!this.signalServer) return;
 			if (error.code === "EADDRINUSE") {
 				// Socket is in use by another process - start polling as fallback
-				console.error(`${LOG_PREFIX} Signal socket in use by another process, relying on polling`);
+				log.warn("Signal socket in use by another process, relying on polling");
 				this.signalServer?.close();
 				this.signalServer = null;
 				void this.handleSocketInUse()
@@ -659,7 +660,7 @@ export class IpcClient {
 						}
 					})
 					.catch((err) => {
-						console.error(`${LOG_PREFIX} handleSocketInUse failed:`, err);
+						log.error("handleSocketInUse failed:", err);
 						// Ensure polling starts as ultimate fallback
 						if (!this.signalServer) {
 							this.startPolling();
@@ -669,7 +670,7 @@ export class IpcClient {
 		});
 
 		this.signalServer.listen(this.config.signalSocketPath, () => {
-			console.error(`${LOG_PREFIX} Listening for ready signals on ${this.config.signalSocketPath}`);
+			log.info(`Listening for ready signals on ${this.config.signalSocketPath}`);
 		});
 	}
 }

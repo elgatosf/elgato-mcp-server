@@ -41,7 +41,12 @@ describe("stdio transport", () => {
 		logMock.mockClear();
 
 		jest.unstable_mockModule("../../utils.js", () => ({
-			log: logMock,
+			log: {
+				error: logMock,
+				warn: logMock,
+				info: logMock,
+				debug: logMock,
+			},
 		}));
 
 		jest.unstable_mockModule("@modelcontextprotocol/sdk/server/stdio.js", () => ({

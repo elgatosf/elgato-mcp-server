@@ -8,7 +8,7 @@ This directory contains comprehensive test coverage for the Elgato MCP Server pr
 | ----------- | ------------------------- |
 | Build       | ✅ Passing                |
 | Test Suites | 12 of 12 passing (100%)   |
-| Tests       | 280 of 280 passing (100%) |
+| Tests       | 288 of 288 passing (100%) |
 | Skipped     | 0 tests                   |
 
 ### Coverage Metrics

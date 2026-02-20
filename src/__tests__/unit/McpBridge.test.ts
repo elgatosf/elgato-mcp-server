@@ -4,6 +4,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ClientManager } from "../../ClientManager.js";
 import { LOG_PREFIX, SDK_NOTIFICATIONS } from "../../constants.js";
 import { createConnectedBridge, createInitializedBridge, McpBridge } from "../../McpBridge.js";
+import { setVerbose } from "../../utils.js";
 import { MockTransport } from "../helpers/MockTransport.js";
 import { createMockClientManager, createMockResource, createMockTool, wait } from "../helpers/testUtils.js";
 
@@ -20,6 +21,7 @@ describe("McpBridge", () => {
 
 	afterEach(() => {
 		bridge.close();
+		setVerbose(false);
 	});
 
 	describe("initialization", () => {
@@ -237,6 +239,7 @@ describe("McpBridge", () => {
 			expect(successCallback).toHaveBeenCalled();
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
 				LOG_PREFIX,
+				"ERROR:",
 				"Failed to notify resources changed:",
 				expect.any(Error),
 			);
@@ -405,7 +408,12 @@ describe("McpBridge", () => {
 				await wait(10);
 
 				expect(errorCallback).toHaveBeenCalled();
-				expect(consoleErrorSpy).toHaveBeenCalledWith(LOG_PREFIX, "Failed to forward notification:", expect.any(Error));
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					LOG_PREFIX,
+					"ERROR:",
+					"Failed to forward notification:",
+					expect.any(Error),
+				);
 				consoleErrorSpy.mockRestore();
 			});
 

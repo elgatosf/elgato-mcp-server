@@ -943,8 +943,9 @@ pnpm lint:fix       # Prettier formatting
 
 - Use Elgato's ESLint and Prettier configurations
 - JSDoc comments for all public APIs
-- Console output via `console.error()` (preserves stdout for stdio transport)
-- Prefix log messages with `[MCP Bridge]`
+- Console output via structured logger to `console.error()` (preserves stdout for stdio transport)
+- Prefix log messages with `[MCP Bridge]` and severity labels (`ERROR:`, `WARN:`, `INFO:`, `DEBUG:`)
+- Error/warn always output; info/debug require `--verbose`/`-v`
 
 ---
 
@@ -1076,6 +1077,7 @@ Options:
   --port <number>     HTTP server port (default: 9090)
   --ngrok             Enable ngrok tunnel (requires NGROK_AUTHTOKEN env var)
   --help, -h          Show help message
+  --verbose, -v       Enable info/debug logging (errors and warnings always output)
 ```
 
 ### 9.5 Environment Variables

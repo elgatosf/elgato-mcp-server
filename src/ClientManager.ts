@@ -136,20 +136,20 @@ export class ClientManager {
 	 * Initializes all managed clients by connecting them and starting their signal listeners.
 	 */
 	public async initialize(): Promise<void> {
-		log("ClientManager initializing...");
+		log.info("ClientManager initializing...");
 		const connectPromises = Array.from(this.clients.entries()).map(async ([name, client]) => {
 			const connected = await client.connect();
 			if (connected) {
-				log(`Connected to ${name}`);
+				log.info(`Connected to ${name}`);
 			} else {
-				log(`${name} not available, starting in disconnected mode`);
+				log.info(`${name} not available, starting in disconnected mode`);
 			}
 			client.startSignalListener();
 		});
 
 		await Promise.all(connectPromises);
 		await this.refreshAll();
-		log(`ClientManager initialized. Connected: [${this.connectedClients.join(", ") || "none"}]`);
+		log.info(`ClientManager initialized. Connected: [${this.connectedClients.join(", ") || "none"}]`);
 	}
 
 	/**
@@ -251,7 +251,7 @@ export class ClientManager {
 			try {
 				await callback();
 			} catch (error) {
-				log("Failed to notify resources changed:", error);
+				log.error("Failed to notify resources changed:", error);
 			}
 		}
 	}
@@ -264,7 +264,7 @@ export class ClientManager {
 			try {
 				await callback();
 			} catch (error) {
-				log("Failed to notify tools changed:", error);
+				log.error("Failed to notify tools changed:", error);
 			}
 		}
 	}
@@ -291,7 +291,7 @@ export class ClientManager {
 					newToolOwnership.set(prefixed, appName);
 				}
 			} catch (error) {
-				log(`Failed to get tools from ${appName}:`, error);
+				log.error(`Failed to get tools from ${appName}:`, error);
 			}
 
 			try {
@@ -303,7 +303,7 @@ export class ClientManager {
 					newResourceOwnership.set(prefixedUri, appName);
 				}
 			} catch (error) {
-				log(`Failed to get resources from ${appName}:`, error);
+				log.error(`Failed to get resources from ${appName}:`, error);
 			}
 		}
 
@@ -321,7 +321,7 @@ export class ClientManager {
 	 */
 	private setupClientCallbacks(name: string, client: IpcClient): void {
 		client.onConnected(async () => {
-			log(`${name} connected`);
+			log.info(`${name} connected`);
 			await this.refreshAll();
 			await this.notifyToolsChanged();
 			await this.notifyResourcesChanged();
@@ -331,7 +331,7 @@ export class ClientManager {
 		});
 
 		client.onDisconnected(async () => {
-			log(`${name} disconnected`);
+			log.info(`${name} disconnected`);
 			await this.refreshAll();
 			await this.notifyToolsChanged();
 			await this.notifyResourcesChanged();
@@ -345,7 +345,7 @@ export class ClientManager {
 				try {
 					cb(method, params);
 				} catch (error) {
-					log(`Notification callback error for ${name}:`, error);
+					log.error(`Notification callback error for ${name}:`, error);
 				}
 			}
 		});

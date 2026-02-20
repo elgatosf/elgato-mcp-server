@@ -4,6 +4,16 @@ import { parseArgs } from "node:util";
 import { LOG_PREFIX, TOOL_PREFIX_SEPARATOR } from "./constants.js";
 import type { CliOptions, McpResource, McpTool } from "./types.js";
 
+let verbose = false;
+
+/**
+ * Enables or disables verbose logging.
+ * @param enabled - Whether to enable verbose logging.
+ */
+export function setVerbose(enabled: boolean): void {
+	verbose = enabled;
+}
+
 /**
  * Prefixes a tool or resource name with an app name using the standard separator.
  * @param appName - The app name to use as prefix (e.g. `"streamdeck"`).
@@ -65,12 +75,29 @@ export function convertToMcpResources(resources: McpResource[]): Resource[] {
 }
 
 /**
- * Logs a message to stderr with the MCP Bridge prefix.
- * @param args - Arguments to log.
+ * Structured logger with severity levels.
+ * - `error` and `warn` always output to stderr regardless of verbose mode.
+ * - `info` and `debug` only output when verbose mode is enabled via --verbose/-v flag.
+ * All messages are prefixed with the MCP Bridge prefix and severity label.
  */
-export function log(...args: unknown[]): void {
-	console.error(LOG_PREFIX, ...args);
-}
+export const log = {
+	/** Logs an error message to stderr. Always outputs regardless of verbose mode. */
+	error: (...args: unknown[]): void => {
+		console.error(LOG_PREFIX, "ERROR:", ...args);
+	},
+	/** Logs a warning message to stderr. Always outputs regardless of verbose mode. */
+	warn: (...args: unknown[]): void => {
+		console.error(LOG_PREFIX, "WARN:", ...args);
+	},
+	/** Logs an informational message to stderr. Only outputs when verbose mode is enabled. */
+	info: (...args: unknown[]): void => {
+		if (verbose) console.error(LOG_PREFIX, "INFO:", ...args);
+	},
+	/** Logs a debug message to stderr. Only outputs when verbose mode is enabled. */
+	debug: (...args: unknown[]): void => {
+		if (verbose) console.error(LOG_PREFIX, "DEBUG:", ...args);
+	},
+};
 
 /**
  * Parses command line arguments into CLI options.
@@ -102,6 +129,11 @@ export function parseCliArgs(args: string[]): CliOptions {
 				short: "h",
 				default: false,
 			},
+			verbose: {
+				type: "boolean" as const,
+				short: "v",
+				default: false,
+			},
 		},
 		strict: false,
 		allowPositionals: true,
@@ -119,6 +151,7 @@ export function parseCliArgs(args: string[]): CliOptions {
 		port: validPort,
 		ngrok: values.ngrok as boolean,
 		help: values.help as boolean,
+		verbose: values.verbose as boolean,
 	};
 }
 
@@ -135,5 +168,6 @@ Options:
   --port <number>     HTTP server port (default: 9090)
   --ngrok             Enable ngrok tunnel (requires NGROK_AUTHTOKEN env var)
   --help, -h          Show help message
+  --verbose, -v        Enable verbose logging (default: silent)
 `);
 }
