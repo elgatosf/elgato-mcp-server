@@ -60,23 +60,6 @@ export class McpBridge {
 	}
 
 	/**
-	 * Disposes of a server instance, cleaning up all associated state.
-	 * Should be called when an HTTP session ends to prevent memory leaks.
-	 * @param mcpServer - The MCP server instance to dispose.
-	 */
-	public disposeServer(mcpServer: McpServer): void {
-		// Remove all resource subscriptions for this server
-		this.resourceSubscriptions.delete(mcpServer);
-
-		// Remove any active tool calls that reference this server
-		for (const [correlationId, server] of this.activeToolCalls) {
-			if (server === mcpServer) {
-				this.activeToolCalls.delete(correlationId);
-			}
-		}
-	}
-
-	/**
 	 * Creates and configures a new MCP Server instance with handlers.
 	 * Uses McpServer with access to the low-level Server API for dynamic tool proxying.
 	 * @returns Configured MCP Server.
@@ -100,6 +83,23 @@ export class McpBridge {
 
 		this.registerHandlers(mcpServer);
 		return mcpServer;
+	}
+
+	/**
+	 * Disposes of a server instance, cleaning up all associated state.
+	 * Should be called when an HTTP session ends to prevent memory leaks.
+	 * @param mcpServer - The MCP server instance to dispose.
+	 */
+	public disposeServer(mcpServer: McpServer): void {
+		// Remove all resource subscriptions for this server
+		this.resourceSubscriptions.delete(mcpServer);
+
+		// Remove any active tool calls that reference this server
+		for (const [correlationId, server] of this.activeToolCalls) {
+			if (server === mcpServer) {
+				this.activeToolCalls.delete(correlationId);
+			}
+		}
 	}
 
 	/**
