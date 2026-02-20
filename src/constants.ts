@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createRequire } from "module";
+import { createRequire } from "node:module";
 
 import type { AppDefinition, ServerInfo } from "./types.js";
 
