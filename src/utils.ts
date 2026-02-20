@@ -180,6 +180,6 @@ Options:
   --port <number>     HTTP server port (default: 9090)
   --ngrok             Enable ngrok tunnel (requires NGROK_AUTHTOKEN env var)
   --help, -h          Show help message
-  --verbose, -v        Enable verbose logging (default: silent)
+  --verbose, -v       Enable verbose logging (default: silent)
 `);
 }
