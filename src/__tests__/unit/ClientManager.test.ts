@@ -76,24 +76,55 @@ describe("ClientManager", () => {
 			expect(factoryCalls).toBeGreaterThan(0);
 		});
 
-		it("should pass correct socket paths to factory", () => {
-			const receivedConfigs: IpcClientConfig[] = [];
-			const factory: IpcClientFactory = (cfg) => {
-				receivedConfigs.push(cfg);
-				return createMockClient() as any;
-			};
+		it("should pass correct unix socket paths to factory on non-windows", () => {
+			const originalPlatform = process.platform;
+			Object.defineProperty(process, "platform", { value: "darwin" });
 
-			const config: ClientManagerConfig = {
-				apps: [{ name: "myapp", socketBaseName: "my-bridge" }],
-			};
+			try {
+				const receivedConfigs: IpcClientConfig[] = [];
+				const factory: IpcClientFactory = (cfg) => {
+					receivedConfigs.push(cfg);
+					return createMockClient() as any;
+				};
 
-			manager = new ClientManager(config, factory);
+				const config: ClientManagerConfig = {
+					apps: [{ name: "myapp", socketBaseName: "my-bridge" }],
+				};
 
-			expect(receivedConfigs).toHaveLength(1);
-			expect(receivedConfigs[0]!.name).toBe("myapp");
-			if (process.platform !== "win32") {
+				manager = new ClientManager(config, factory);
+
+				expect(receivedConfigs).toHaveLength(1);
+				expect(receivedConfigs[0]!.name).toBe("myapp");
 				expect(receivedConfigs[0]!.socketPath).toBe("/tmp/my-bridge.sock");
 				expect(receivedConfigs[0]!.signalSocketPath).toBe("/tmp/my-bridge-ready.sock");
+			} finally {
+				Object.defineProperty(process, "platform", { value: originalPlatform });
+			}
+		});
+
+		it("should pass correct named pipe paths to factory on windows", () => {
+			const originalPlatform = process.platform;
+			Object.defineProperty(process, "platform", { value: "win32" });
+
+			try {
+				const receivedConfigs: IpcClientConfig[] = [];
+				const factory: IpcClientFactory = (cfg) => {
+					receivedConfigs.push(cfg);
+					return createMockClient() as any;
+				};
+
+				const config: ClientManagerConfig = {
+					apps: [{ name: "myapp", socketBaseName: "my-bridge" }],
+				};
+
+				manager = new ClientManager(config, factory);
+
+				expect(receivedConfigs).toHaveLength(1);
+				expect(receivedConfigs[0]!.name).toBe("myapp");
+				expect(receivedConfigs[0]!.socketPath).toBe("\\\\.\\pipe\\my-bridge");
+				expect(receivedConfigs[0]!.signalSocketPath).toBe("\\\\.\\pipe\\my-bridge-ready");
+			} finally {
+				Object.defineProperty(process, "platform", { value: originalPlatform });
 			}
 		});
 	});

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, it } from "@jest/globals";
 
 import { getAppSocketPaths, KNOWN_APPS, TOOL_PREFIX_SEPARATOR } from "../../constants.js";
 import type { AppDefinition } from "../../types.js";
@@ -30,21 +30,41 @@ describe("constants", () => {
 
 	describe("getAppSocketPaths", () => {
 		const testApp: AppDefinition = { name: "test", socketBaseName: "my-test-bridge" };
+		let originalPlatform: NodeJS.Platform;
 
-		it("should return unix socket paths on non-windows", () => {
-			if (process.platform !== "win32") {
-				const paths = getAppSocketPaths(testApp);
-				expect(paths.socketPath).toBe("/tmp/my-test-bridge.sock");
-				expect(paths.signalSocketPath).toBe("/tmp/my-test-bridge-ready.sock");
-			}
+		beforeEach(() => {
+			originalPlatform = process.platform;
+		});
+
+		afterEach(() => {
+			Object.defineProperty(process, "platform", { value: originalPlatform });
+		});
+
+		it("should return unix socket paths on darwin", () => {
+			Object.defineProperty(process, "platform", { value: "darwin" });
+
+			const paths = getAppSocketPaths(testApp);
+
+			expect(paths.socketPath).toBe("/tmp/my-test-bridge.sock");
+			expect(paths.signalSocketPath).toBe("/tmp/my-test-bridge-ready.sock");
+		});
+
+		it("should return unix socket paths on linux", () => {
+			Object.defineProperty(process, "platform", { value: "linux" });
+
+			const paths = getAppSocketPaths(testApp);
+
+			expect(paths.socketPath).toBe("/tmp/my-test-bridge.sock");
+			expect(paths.signalSocketPath).toBe("/tmp/my-test-bridge-ready.sock");
 		});
 
 		it("should return named pipe paths on windows", () => {
-			if (process.platform === "win32") {
-				const paths = getAppSocketPaths(testApp);
-				expect(paths.socketPath).toBe("\\\\.\\pipe\\my-test-bridge");
-				expect(paths.signalSocketPath).toBe("\\\\.\\pipe\\my-test-bridge-ready");
-			}
+			Object.defineProperty(process, "platform", { value: "win32" });
+
+			const paths = getAppSocketPaths(testApp);
+
+			expect(paths.socketPath).toBe("\\\\.\\pipe\\my-test-bridge");
+			expect(paths.signalSocketPath).toBe("\\\\.\\pipe\\my-test-bridge-ready");
 		});
 	});
 });
