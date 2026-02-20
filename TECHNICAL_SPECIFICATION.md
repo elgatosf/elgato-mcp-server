@@ -24,6 +24,7 @@ The Stream Deck MCP Bridge is a TypeScript/Node.js application that acts as a pr
 ```
 
 The bridge operates in proxy mode:
+
 1. Receives MCP requests from clients via stdio or HTTP transport
 2. Forwards tool calls to Stream Deck via local IPC socket
 3. Returns responses back to MCP clients
@@ -34,35 +35,35 @@ The bridge operates in proxy mode:
 
 ### 2.1 Runtime Environment
 
-| Requirement | Version |
-|-------------|---------|
-| Node.js | v18+ (ES2022 support required) |
-| Package Manager | pnpm 10.26.0+ |
-| Operating System | macOS or Windows |
+| Requirement      | Version                        |
+| ---------------- | ------------------------------ |
+| Node.js          | v18+ (ES2022 support required) |
+| Package Manager  | pnpm 10.26.0+                  |
+| Operating System | macOS or Windows               |
 
 ### 2.2 Dependencies
 
 #### Production Dependencies
 
-| Package | Purpose |
-|---------|---------|
-| `@modelcontextprotocol/sdk` | MCP protocol implementation |
-| `@ngrok/ngrok` | Optional HTTP tunnel for remote access |
-| `cors` | CORS middleware for HTTP transport |
-| `express` | HTTP server framework |
-| `zod` | Runtime type validation |
+| Package                     | Purpose                                |
+| --------------------------- | -------------------------------------- |
+| `@modelcontextprotocol/sdk` | MCP protocol implementation            |
+| `@ngrok/ngrok`              | Optional HTTP tunnel for remote access |
+| `cors`                      | CORS middleware for HTTP transport     |
+| `express`                   | HTTP server framework                  |
+| `zod`                       | Runtime type validation                |
 
 #### Development Dependencies
 
-| Package | Purpose |
-|---------|---------|
-| `typescript` | TypeScript compiler |
-| `@types/node` | Node.js type definitions |
-| `@types/cors` | CORS type definitions |
-| `@types/express` | Express type definitions |
-| `eslint` | Code linting |
-| `prettier` | Code formatting |
-| `@changesets/cli` | Version management |
+| Package           | Purpose                  |
+| ----------------- | ------------------------ |
+| `typescript`      | TypeScript compiler      |
+| `@types/node`     | Node.js type definitions |
+| `@types/cors`     | CORS type definitions    |
+| `@types/express`  | Express type definitions |
+| `eslint`          | Code linting             |
+| `prettier`        | Code formatting          |
+| `@changesets/cli` | Version management       |
 
 ---
 
@@ -70,69 +71,86 @@ The bridge operates in proxy mode:
 
 ### 3.1 Component Breakdown
 
-The system consists of three main source files:
+The system consists of four main source files:
 
 #### 3.1.1 Main Entry Point (`src/index.ts`)
 
 **Responsibilities:**
+
 - Parse command-line arguments and configure transport mode
 - Initialize and manage MCP server instances
-- Handle tool discovery and caching from Stream Deck
+- Handle tool discovery and caching from connected apps
 - Manage transport layer (stdio or HTTP)
 - Coordinate graceful shutdown
 
-#### 3.1.2 Stream Deck Client (`src/StreamDeckClient.ts`)
+#### 3.1.2 IPC Client (`src/IpcClient.ts`)
 
 **Responsibilities:**
-- Establish and maintain IPC connection to Stream Deck
+
+- Establish and maintain IPC connection to a single app (e.g. Stream Deck)
 - Implement request/response protocol
 - Handle automatic reconnection via signal socket
 - Manage request timeouts and pending request tracking
-- Handle elicitation requests from Stream Deck during tool calls
+- Handle elicitation requests from the app during tool calls
+
+#### 3.1.2a Client Manager (`src/ClientManager.ts`)
+
+**Responsibilities:**
+
+- Manage one `IpcClient` instance per known app
+- Aggregate tools and resources across all connected clients using `appname__` prefixes
+- Route `tools/call` and `resources/read` requests to the correct client by stripping the prefix
+- Forward `onToolsChanged`, `onResourcesChanged`, `onNotification`, and `onElicitation` events from any client to registered callbacks
 
 #### 3.1.3 MCP Bridge (`src/McpBridge.ts`)
 
 **Responsibilities:**
+
 - Create and configure MCP server instances
-- Handle tool discovery and caching from Stream Deck
-- Manage tool list change notifications
-- Forward Stream Deck notifications to registered callbacks
+- Handle tool and resource list requests by delegating to `ClientManager`
+- Manage tool/resource list change notifications
+- Forward app notifications to registered callbacks via `onClientNotification`
 - Forward elicitation requests to MCP clients during tool calls
 
 #### 3.1.4 Constants (`src/constants.ts`)
 
 **Responsibilities:**
+
 - Provide platform-specific socket paths
 - Abstract platform differences (Unix sockets vs Windows Named Pipes)
 - Define shared constants (timeouts, buffer sizes, log prefix)
 - Define SDK notification types for Stream Deck communication
 
 **Key Exports:**
+
 - `SOCKET_PATH`: Main IPC socket path
 - `SIGNAL_SOCKET_PATH`: Signal notification socket path
 - `REQUEST_TIMEOUT`: Request timeout in milliseconds
 - `MAX_BUFFER_SIZE`: Maximum buffer size for IPC messages
 - `ELICITATION_TIMEOUT_MS`: Timeout for elicitation requests (300 seconds / 5 minutes)
 - `SDK_NOTIFICATIONS`: Notification type constants for Stream Deck SDK
-  - `TOOLS_LIST_CHANGED`: `"notifications/tools/list_changed"`
-  - `RESOURCES_LIST_CHANGED`: `"notifications/resources/list_changed"`
-  - `RESOURCES_UPDATED`: `"notifications/resources/updated"`
+    - `TOOLS_LIST_CHANGED`: `"notifications/tools/list_changed"`
+    - `RESOURCES_LIST_CHANGED`: `"notifications/resources/list_changed"`
+    - `RESOURCES_UPDATED`: `"notifications/resources/updated"`
 
 #### 3.1.5 Transport Layers (`src/transports/`)
 
 **Files:**
+
 - `src/transports/stdio.ts`: stdio transport for Claude Desktop integration
 - `src/transports/http.ts`: HTTP transport for web-based clients
 
 #### 3.1.6 Utilities (`src/utils.ts`)
 
 **Responsibilities:**
+
 - Provide logging utilities with consistent prefix
 - Common helper functions
 
 #### 3.1.7 Type Definitions (`src/types.ts`)
 
 **Responsibilities:**
+
 - Define TypeScript interfaces for IPC protocol
 - Define request/response types for Stream Deck communication
 
@@ -155,7 +173,12 @@ MCP Client Request
          │
          ▼
 ┌──────────────────┐
-│ StreamDeckClient │ ← Forwards call_tool requests
+│  ClientManager   │ ← Aggregates tools/resources, routes calls by appname__ prefix
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│    IpcClient     │ ← One per app; forwards call_tool requests over IPC
 └────────┬─────────┘
          │
          ▼ (IPC Socket)
@@ -180,9 +203,11 @@ MCP Client Request
 The bridge implements standard MCP protocol endpoints:
 
 #### tools/list
+
 Returns dynamically discovered tools from Stream Deck.
 
 **Response:**
+
 ```json
 {
   "tools": [
@@ -197,97 +222,112 @@ Returns dynamically discovered tools from Stream Deck.
 ```
 
 #### tools/call
+
 Forwards tool invocation to Stream Deck and returns the result.
 
 **Request:**
+
 ```json
 {
-  "name": "tool_name",
-  "arguments": { "param1": "value1" }
+    "name": "tool_name",
+    "arguments": { "param1": "value1" }
 }
 ```
 
 **Response (Success):**
+
 ```json
 {
-  "content": [{ "type": "text", "text": "..." }]
+    "content": [{ "type": "text", "text": "..." }]
 }
 ```
 
 **Response (Error):**
+
 ```json
 {
-  "content": [{ "type": "text", "text": "Error message" }],
-  "isError": true
+    "content": [{ "type": "text", "text": "Error message" }],
+    "isError": true
 }
 ```
 
 #### resources/list
+
 Returns dynamically discovered resources from Stream Deck.
 
 **Response:**
+
 ```json
 {
-  "resources": [
-    {
-      "uri": "streamdeck://resource/identifier",
-      "name": "resource_name",
-      "description": "Resource description",
-      "mimeType": "application/json"
-    }
-  ]
+    "resources": [
+        {
+            "uri": "streamdeck://resource/identifier",
+            "name": "resource_name",
+            "description": "Resource description",
+            "mimeType": "application/json"
+        }
+    ]
 }
 ```
 
 #### resources/read
+
 Reads a specific resource by URI from Stream Deck.
 
 **Request:**
+
 ```json
 {
-  "uri": "streamdeck://resource/identifier"
+    "uri": "streamdeck://resource/identifier"
 }
 ```
 
 **Response (Success):**
+
 ```json
 {
-  "contents": [
-    {
-      "uri": "streamdeck://resource/identifier",
-      "mimeType": "application/json",
-      "text": "{\"key\": \"value\"}"
-    }
-  ]
+    "contents": [
+        {
+            "uri": "streamdeck://resource/identifier",
+            "mimeType": "application/json",
+            "text": "{\"key\": \"value\"}"
+        }
+    ]
 }
 ```
 
 #### resources/subscribe
+
 Subscribes to updates for a specific resource URI.
 
 **Request:**
+
 ```json
 {
-  "uri": "streamdeck://resource/identifier"
+    "uri": "streamdeck://resource/identifier"
 }
 ```
 
 **Response:**
+
 ```json
 {}
 ```
 
 #### resources/unsubscribe
+
 Unsubscribes from updates for a specific resource URI.
 
 **Request:**
+
 ```json
 {
-  "uri": "streamdeck://resource/identifier"
+    "uri": "streamdeck://resource/identifier"
 }
 ```
 
 **Response:**
+
 ```json
 {}
 ```
@@ -297,9 +337,10 @@ Unsubscribes from updates for a specific resource URI.
 - `notifications/tools/list_changed`: Sent when Stream Deck connects/reconnects and tools are re-discovered
 - `notifications/resources/list_changed`: Sent when the list of available resources changes
 - `notifications/resources/updated`: Sent when a subscribed resource's content is updated (only forwarded if client has subscribed to the resource)
-- Custom notifications: Non-standard notifications from Stream Deck are forwarded to registered callbacks via `onStreamDeckNotification()`
+- Custom notifications: Non-standard notifications from connected apps are forwarded to registered callbacks via `onClientNotification()`
 
 **Notification vs Response Distinction:**
+
 - **Notifications**: Have a `method` field but no `id` field
 - **Responses**: Have an `id` field that correlates with the request ID
 - **Elicitation Requests**: Have BOTH `id` AND `method: "elicitation/create"` (unique hybrid type)
@@ -311,10 +352,10 @@ During a `tools/call` request, Stream Deck may need additional information from 
 #### Elicitation Message Flow
 
 ```
-Stream Deck → StreamDeckClient → McpBridge → MCP Client → User
-       ↑                                                    │
-       └────────────────────────────────────────────────────┘
-                         Response
+Stream Deck → IpcClient → ClientManager → McpBridge → MCP Client → User
+       ↑                                                             │
+       └─────────────────────────────────────────────────────────────┘
+                                  Response
 ```
 
 #### Elicitation Request Format
@@ -323,22 +364,23 @@ Stream Deck sends an elicitation request during tool execution:
 
 ```json
 {
-  "id": "9b3908ad-40cf-4d82-96e1-abc123",
-  "method": "elicitation/create",
-  "params": {
-    "message": "Please provide additional information",
-    "mode": "form",
-    "requestedSchema": {
-      "type": "object",
-      "properties": {
-        "fieldName": { "type": "string" }
-      }
+    "id": "9b3908ad-40cf-4d82-96e1-abc123",
+    "method": "elicitation/create",
+    "params": {
+        "message": "Please provide additional information",
+        "mode": "form",
+        "requestedSchema": {
+            "type": "object",
+            "properties": {
+                "fieldName": { "type": "string" }
+            }
+        }
     }
-  }
 }
 ```
 
 **Key Fields:**
+
 - `id`: Unique request ID for response correlation
 - `method`: Always `"elicitation/create"`
 - `params.message`: Prompt message to display to the user
@@ -351,16 +393,17 @@ The bridge sends back the user's response:
 
 ```json
 {
-  "id": "9b3908ad-40cf-4d82-96e1-abc123",
-  "method": "elicitation/response",
-  "result": {
-    "action": "accept",
-    "content": { "fieldName": "user value" }
-  }
+    "id": "9b3908ad-40cf-4d82-96e1-abc123",
+    "method": "elicitation/response",
+    "result": {
+        "action": "accept",
+        "content": { "fieldName": "user value" }
+    }
 }
 ```
 
 **Response Actions:**
+
 - `accept`: User provided input (includes `content` field)
 - `decline`: User declined to provide input
 - `cancel`: User cancelled the operation
@@ -371,7 +414,7 @@ Elicitation requests have a 300-second (5-minute) timeout (`ELICITATION_TIMEOUT_
 
 #### Tool Call Timeout Extension During Elicitation
 
-When a tool call triggers an elicitation request, the standard 30-second request timeout (`REQUEST_TIMEOUT_MS`) would normally expire before the user has a chance to respond. To handle this, the `StreamDeckClient` automatically extends the timeout for the pending tool call when an elicitation request is received:
+When a tool call triggers an elicitation request, the standard 30-second request timeout (`REQUEST_TIMEOUT_MS`) would normally expire before the user has a chance to respond. To handle this, the `IpcClient` automatically extends the timeout for the pending tool call when an elicitation request is received:
 
 1. Tool call is sent to Stream Deck with a 30-second timeout
 2. Stream Deck sends back an `elicitation/create` request with `relatedToolCallId` matching the tool call
@@ -386,42 +429,48 @@ Communication with Stream Deck uses JSON messages terminated by newline (`\n`).
 #### Request Types
 
 **server_info**
+
 ```json
 { "id": "1", "method": "server_info" }
 ```
 
 **tools_list**
+
 ```json
 { "id": "2", "method": "tools_list" }
 ```
 
 **call_tool**
+
 ```json
 {
-  "id": "3",
-  "method": "call_tool",
-  "toolName": "button_press",
-  "arguments": { "button_id": 5 }
+    "id": "3",
+    "method": "call_tool",
+    "toolName": "button_press",
+    "arguments": { "button_id": 5 }
 }
 ```
 
 **resources_list**
+
 ```json
 { "id": "4", "method": "resources_list" }
 ```
 
 **resources_read**
+
 ```json
 {
-  "id": "5",
-  "method": "resources_read",
-  "uri": "streamdeck://resource/identifier"
+    "id": "5",
+    "method": "resources_read",
+    "uri": "streamdeck://resource/identifier"
 }
 ```
 
 #### Response Types
 
 **ServerInfoResponse**
+
 ```json
 {
   "id": "1",
@@ -435,6 +484,7 @@ Communication with Stream Deck uses JSON messages terminated by newline (`\n`).
 ```
 
 **ToolsListResponse**
+
 ```json
 {
   "id": "2",
@@ -454,6 +504,7 @@ Communication with Stream Deck uses JSON messages terminated by newline (`\n`).
 ```
 
 **CallToolResponse**
+
 ```json
 {
   "id": "3",
@@ -462,6 +513,7 @@ Communication with Stream Deck uses JSON messages terminated by newline (`\n`).
 ```
 
 **ResourcesListResponse**
+
 ```json
 {
   "id": "4",
@@ -482,31 +534,33 @@ Communication with Stream Deck uses JSON messages terminated by newline (`\n`).
 ```
 
 **ResourcesReadResponse**
+
 ```json
 {
-  "id": "5",
-  "result": {
-    "uri": "streamdeck://resource/identifier",
-    "mimeType": "application/json",
-    "content": { "key": "value" }
-  }
+    "id": "5",
+    "result": {
+        "uri": "streamdeck://resource/identifier",
+        "mimeType": "application/json",
+        "content": { "key": "value" }
+    }
 }
 ```
 
 **ErrorResponse**
+
 ```json
 {
-  "id": "3",
-  "error": { "message": "Error description", "data": "..." }
+    "id": "3",
+    "error": { "message": "Error description", "data": "..." }
 }
 ```
 
 ### 4.4 Socket Paths
 
-| Platform | Main Socket | Signal Socket |
-|----------|-------------|---------------|
-| macOS | `/tmp/elgato-streamdeck-mcp-bridge.sock` | `/tmp/elgato-streamdeck-mcp-bridge-ready.sock` |
-| Windows | `\\.\pipe\streamdeck-mcp-bridge` | `\\.\pipe\streamdeck-mcp-bridge-ready` |
+| Platform | Main Socket                              | Signal Socket                                  |
+| -------- | ---------------------------------------- | ---------------------------------------------- |
+| macOS    | `/tmp/elgato-streamdeck-mcp-bridge.sock` | `/tmp/elgato-streamdeck-mcp-bridge-ready.sock` |
+| Windows  | `\\.\pipe\streamdeck-mcp-bridge`         | `\\.\pipe\streamdeck-mcp-bridge-ready`         |
 
 ---
 
@@ -526,17 +580,18 @@ The bridge uses the low-level Server API (`server.server.setRequestHandler`) ins
 ```typescript
 // Custom ListTools handler - returns cached tools from Stream Deck
 server.server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return { tools: convertToMcpTools(cachedTools) };
+    return { tools: convertToMcpTools(cachedTools) };
 });
 
 // Custom CallTool handler - forwards to Stream Deck
 server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const result = await streamDeckClient.callTool(name, args);
-  return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    const result = await streamDeckClient.callTool(name, args);
+    return { content: [{ type: "text", text: JSON.stringify(result) }] };
 });
 ```
 
 **Server Capabilities:**
+
 ```typescript
 {
   capabilities: {
@@ -549,12 +604,14 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
 #### 5.1.2 Stream Deck Client Implementation
 
 **Connection Management:**
+
 - Uses Node.js `net` module for socket communication
 - Implements request/response correlation via unique IDs
 - 30-second request timeout with automatic cleanup
 - 1MB maximum buffer size to prevent memory exhaustion
 
 **Message Protocol:**
+
 - JSON serialization
 - Newline (`\n`) message delimiter
 - Incremental request ID counter
@@ -572,6 +629,7 @@ private sendRequest(request: RequestBase): Promise<ResponseBase> {
 #### 5.1.3 Transport Layers
 
 **stdio Transport:**
+
 - Default transport mode for Claude Desktop integration
 - Single MCP server instance
 - Uses `StdioServerTransport` from MCP SDK
@@ -582,6 +640,7 @@ await server.connect(transport);
 ```
 
 **HTTP Transport:**
+
 - Streamable HTTP transport for web-based clients
 - Session-based: each session gets its own MCP server instance
 - Endpoints: `POST /mcp`, `GET /mcp` (SSE), `DELETE /mcp`, `GET /health`
@@ -590,9 +649,13 @@ await server.connect(transport);
 
 ```typescript
 const transport = new StreamableHTTPServerTransport({
-  sessionIdGenerator: () => randomUUID(),
-  onsessioninitialized: (id) => { /* track session */ },
-  onsessionclosed: (id) => { /* cleanup session */ },
+    sessionIdGenerator: () => randomUUID(),
+    onsessioninitialized: (id) => {
+        /* track session */
+    },
+    onsessionclosed: (id) => {
+        /* cleanup session */
+    },
 });
 ```
 
@@ -626,11 +689,12 @@ The MCP server starts immediately, even if Stream Deck is not available:
 4. MCP clients can connect regardless of Stream Deck availability
 
 **Default Server Info:**
+
 ```typescript
 const DEFAULT_SERVER_INFO: ServerInfoResponse = {
-  id: "0",
-  name: "Stream Deck MCP Server",
-  version: "1.0.0",
+    id: "0",
+    name: "Elgato MCP Server",
+    version: "1.0.0",
 };
 ```
 
@@ -645,13 +709,14 @@ Instead of polling, the bridge uses a signal socket for reconnection:
 5. MCP clients receive `tools/list_changed` notification
 
 **Signal Socket Server:**
+
 ```typescript
 this.signalServer = net.createServer((clientSocket) => {
-  console.error("[MCP Bridge] Received ready signal from Stream Deck");
-  if (this.readyCallback) {
-    this.readyCallback();
-  }
-  clientSocket.end();
+    console.error("[MCP Bridge] Received ready signal from Stream Deck");
+    if (this.readyCallback) {
+        this.readyCallback();
+    }
+    clientSocket.end();
 });
 ```
 
@@ -660,37 +725,38 @@ this.signalServer = net.createServer((clientSocket) => {
 ```typescript
 // Register callback for connection events
 streamDeckClient.onConnected(async () => {
-  await discoverServerAndTools();
-  await mcpServer.sendToolListChanged();
+    await discoverServerAndTools();
+    await mcpServer.sendToolListChanged();
 });
 ```
 
 #### 5.2.4 Notification Callback System
 
-The bridge supports forwarding notifications from Stream Deck to registered callbacks:
+The bridge supports forwarding notifications from connected apps to registered callbacks:
 
 ```typescript
-// Register callback for Stream Deck notifications
-bridge.onStreamDeckNotification((method, params) => {
-  console.log(`Received notification: ${method}`, params);
+// Register callback for app notifications
+bridge.onClientNotification((method, params) => {
+    console.log(`Received notification: ${method}`, params);
 });
 
 // Register callback for tools changed events
 bridge.onToolsChanged(async () => {
-  await mcpServer.sendToolListChanged();
+    await mcpServer.sendToolListChanged();
 });
 
 // Register callback for resources changed events
 bridge.onResourcesChanged(async () => {
-  await mcpServer.sendResourceListChanged();
+    await mcpServer.sendResourceListChanged();
 });
 ```
 
 **Notification Handling:**
+
 - `notifications/tools/list_changed` - Triggers a tool refresh and invokes `onToolsChanged` callbacks
 - `notifications/resources/list_changed` - Triggers a resource refresh and invokes `onResourcesChanged` callbacks
 - `notifications/resources/updated` - Forwards resource update notifications only to clients that have subscribed to the specific resource URI
-- All other notifications are forwarded to callbacks registered via `onStreamDeckNotification()`
+- All other notifications are forwarded to callbacks registered via `onClientNotification()`
 - Multiple callbacks can be registered; errors in one callback don't affect others
 - Callbacks are invoked in registration order
 
@@ -703,9 +769,9 @@ The bridge maintains a `resourceSubscriptions` Set to track which resource URIs 
 
 ```typescript
 const timeout = setTimeout(() => {
-  this.pendingRequests.delete(request.id);
-  reject(new Error(`Request timeout for method: ${request.method}`));
-}, this.requestTimeout);  // 30 seconds
+    this.pendingRequests.delete(request.id);
+    reject(new Error(`Request timeout for method: ${request.method}`));
+}, this.requestTimeout); // 30 seconds
 ```
 
 #### 5.3.2 Buffer Overflow Protection
@@ -727,11 +793,11 @@ private onData(data: Buffer | string): void {
 
 ```typescript
 const shutdown = async () => {
-  streamDeckClient.disconnect();
-  if (httpServerInstance) {
-    httpServerInstance.close();
-  }
-  process.exit(0);
+    streamDeckClient.disconnect();
+    if (httpServerInstance) {
+        httpServerInstance.close();
+    }
+    process.exit(0);
 };
 
 process.on("SIGINT", shutdown);
@@ -740,12 +806,13 @@ process.on("SIGTERM", shutdown);
 
 #### 5.3.4 Tool Call Error Responses
 
-When Stream Deck is disconnected:
+When no apps are connected:
+
 ```typescript
 return {
   content: [{
     type: "text",
-    text: "Stream Deck is not connected. Please start Stream Deck and try again."
+    text: "No apps connected. Please start the required app and try again."
   }],
   isError: true,
 };
@@ -757,11 +824,11 @@ return {
 
 ### 6.1 Platform Support
 
-| Platform | Support Level | IPC Mechanism |
-|----------|---------------|---------------|
-| macOS | Full | Unix Domain Sockets |
-| Windows | Full | Named Pipes |
-| Linux | Not Supported | N/A |
+| Platform | Support Level | IPC Mechanism       |
+| -------- | ------------- | ------------------- |
+| macOS    | Full          | Unix Domain Sockets |
+| Windows  | Full          | Named Pipes         |
+| Linux    | Not Supported | N/A                 |
 
 ```typescript
 switch (process.platform) {
@@ -777,13 +844,13 @@ switch (process.platform) {
 
 ### 6.2 Performance Requirements
 
-| Metric | Requirement |
-|--------|-------------|
-| Quick Connection Timeout | 1 second |
-| Request Timeout | 30 seconds |
-| Elicitation Timeout | 300 seconds |
-| Maximum Buffer Size | 1 MB |
-| HTTP Default Port | 9090 |
+| Metric                   | Requirement |
+| ------------------------ | ----------- |
+| Quick Connection Timeout | 1 second    |
+| Request Timeout          | 30 seconds  |
+| Elicitation Timeout      | 300 seconds |
+| Maximum Buffer Size      | 1 MB        |
+| HTTP Default Port        | 9090        |
 
 ### 6.3 Limitations
 
@@ -803,7 +870,8 @@ streamdeck-mcp/
 ├── src/
 │   ├── index.ts              # Main entry point
 │   ├── McpBridge.ts          # MCP server and tool management
-│   ├── StreamDeckClient.ts   # Stream Deck IPC client
+│   ├── ClientManager.ts      # Multi-app IPC client aggregator
+│   ├── IpcClient.ts          # Single-app IPC client
 │   ├── constants.ts          # Platform-specific paths and constants
 │   ├── types.ts              # TypeScript type definitions
 │   ├── utils.ts              # Logging and utility functions
@@ -821,21 +889,21 @@ streamdeck-mcp/
 
 ```json
 {
-  "compilerOptions": {
-    "strict": true,                    // Enable all strict checks
-    "esModuleInterop": true,           // CommonJS/ESM interop
-    "skipLibCheck": true,              // Skip type checking of declarations
-    "lib": ["es2022"],                 // ES2022 standard library
-    "module": "NodeNext",              // Node.js ESM module system
-    "moduleResolution": "NodeNext",    // Node.js module resolution
-    "noImplicitOverride": true,        // Require 'override' keyword
-    "noUncheckedIndexedAccess": true,  // Strict index access
-    "outDir": "bin/",                  // Output directory
-    "target": "es2022",                // ES2022 output
-    "verbatimModuleSyntax": true       // Strict import/export syntax
-  },
-  "include": ["src/"],
-  "exclude": ["node_modules/"]
+    "compilerOptions": {
+        "strict": true, // Enable all strict checks
+        "esModuleInterop": true, // CommonJS/ESM interop
+        "skipLibCheck": true, // Skip type checking of declarations
+        "lib": ["es2022"], // ES2022 standard library
+        "module": "NodeNext", // Node.js ESM module system
+        "moduleResolution": "NodeNext", // Node.js module resolution
+        "noImplicitOverride": true, // Require 'override' keyword
+        "noUncheckedIndexedAccess": true, // Strict index access
+        "outDir": "bin/", // Output directory
+        "target": "es2022", // ES2022 output
+        "verbatimModuleSyntax": true // Strict import/export syntax
+    },
+    "include": ["src/"],
+    "exclude": ["node_modules/"]
 }
 ```
 
@@ -859,14 +927,14 @@ pnpm lint:fix       # Prettier formatting
 
 ```json
 {
-  "type": "module",           // ESM module format
-  "bin": {
-    "mcp-server-streamdeck": "bin/index.js"
-  },
-  "files": ["bin/"],          // Published files
-  "exports": {
-    "./package.json": "./package.json"
-  }
+    "type": "module", // ESM module format
+    "bin": {
+        "mcp-server-streamdeck": "bin/index.js"
+    },
+    "files": ["bin/"], // Published files
+    "exports": {
+        "./package.json": "./package.json"
+    }
 }
 ```
 
@@ -886,52 +954,52 @@ pnpm lint:fix       # Prettier formatting
 **Testable Components:**
 
 1. **Socket Path Generation**
-   - Test platform-specific path generation
-   - Mock `process.platform` for cross-platform testing
+    - Test platform-specific path generation
+    - Mock `process.platform` for cross-platform testing
 
 2. **Tool Conversion**
-   - Test `convertToMcpTools()` with various input formats
-   - Verify schema transformation correctness
+    - Test `convertToMcpTools()` with various input formats
+    - Verify schema transformation correctness
 
 3. **Message Parsing**
-   - Test buffer processing and message extraction
-   - Test handling of partial messages and multiple messages
+    - Test buffer processing and message extraction
+    - Test handling of partial messages and multiple messages
 
 4. **Request/Response Correlation**
-   - Test ID matching and timeout handling
-   - Test error response handling
+    - Test ID matching and timeout handling
+    - Test error response handling
 
 5. **Notification Handling**
-   - Test type guards (`isNotification()` vs `isIpcResponse()`)
-   - Test multiple callback support
-   - Test error isolation between callbacks
-   - Test message stream parsing with mixed notifications and responses
+    - Test type guards (`isNotification()` vs `isIpcResponse()`)
+    - Test multiple callback support
+    - Test error isolation between callbacks
+    - Test message stream parsing with mixed notifications and responses
 
 6. **Elicitation Handling**
-   - Test type guard (`isElicitationRequest()` - checks for both `id` and `method`)
-   - Test callback registration and invocation
-   - Test timeout handling (decline after timeout)
-   - Test error handling (callback errors, destroyed socket)
-   - Test message stream parsing with elicitation, responses, and notifications mixed
-   - Test timeout extension for pending tool calls when elicitation is received
+    - Test type guard (`isElicitationRequest()` - checks for both `id` and `method`)
+    - Test callback registration and invocation
+    - Test timeout handling (decline after timeout)
+    - Test error handling (callback errors, destroyed socket)
+    - Test message stream parsing with elicitation, responses, and notifications mixed
+    - Test timeout extension for pending tool calls when elicitation is received
 
 ### 8.2 Integration Testing Requirements
 
 **Connection Scenarios:**
 
-| Scenario | Expected Behavior |
-|----------|------------------|
-| Stream Deck running before bridge | Connect immediately, discover tools |
-| Bridge starts before Stream Deck | Start with empty tools, wait for signal |
-| Stream Deck crashes mid-session | Notify clients, wait for reconnection |
-| Stream Deck restarts | Receive signal, reconnect, re-discover tools |
+| Scenario                          | Expected Behavior                            |
+| --------------------------------- | -------------------------------------------- |
+| Stream Deck running before bridge | Connect immediately, discover tools          |
+| Bridge starts before Stream Deck  | Start with empty tools, wait for signal      |
+| Stream Deck crashes mid-session   | Notify clients, wait for reconnection        |
+| Stream Deck restarts              | Receive signal, reconnect, re-discover tools |
 
 **Transport Testing:**
 
-| Transport | Test Cases |
-|-----------|------------|
-| stdio | Initialize request, tools/list, tools/call |
-| HTTP | Session creation, multiple sessions, session cleanup |
+| Transport | Test Cases                                           |
+| --------- | ---------------------------------------------------- |
+| stdio     | Initialize request, tools/list, tools/call           |
+| HTTP      | Session creation, multiple sessions, session cleanup |
 
 ### 8.3 Manual Testing Procedures
 
@@ -960,9 +1028,11 @@ curl http://localhost:9090/health
 The package is published as `@elgato/streamdeck-mcp` to npm registry.
 
 **Published Files:**
+
 - `bin/index.js` - Main entry point
 - `bin/McpBridge.js` - MCP server and tool management
-- `bin/StreamDeckClient.js` - IPC client
+- `bin/ClientManager.js` - Multi-app IPC client aggregator
+- `bin/IpcClient.js` - Single-app IPC client
 - `bin/constants.js` - Platform-specific paths and constants
 - `bin/types.js` - TypeScript type definitions
 - `bin/utils.js` - Logging and utility functions
@@ -982,14 +1052,15 @@ npm install @elgato/streamdeck-mcp
 ### 9.3 Configuration
 
 **Claude Desktop Configuration (`claude_desktop_config.json`):**
+
 ```json
 {
-  "mcpServers": {
-    "streamdeck": {
-      "command": "mcp-server-streamdeck",
-      "args": []
+    "mcpServers": {
+        "streamdeck": {
+            "command": "mcp-server-streamdeck",
+            "args": []
+        }
     }
-  }
 }
 ```
 
@@ -1008,8 +1079,8 @@ Options:
 
 ### 9.5 Environment Variables
 
-| Variable | Purpose |
-|----------|---------|
+| Variable          | Purpose                                 |
+| ----------------- | --------------------------------------- |
 | `NGROK_AUTHTOKEN` | Required for ngrok tunnel functionality |
 
 ### 9.6 Runtime Scripts
@@ -1031,141 +1102,141 @@ pnpm http
 ```typescript
 // Request base
 interface RequestBase {
-  id: string;
-  method: string;
+    id: string;
+    method: string;
 }
 
 // Error structure
 interface McpError {
-  message: string;
-  data?: string;
+    message: string;
+    data?: string;
 }
 
 // Icon structure
 interface McpIcon {
-  src: string;
-  mimeType?: string;
-  sizes?: string[];
-  theme?: "dark" | "light";
+    src: string;
+    mimeType?: string;
+    sizes?: string[];
+    theme?: "dark" | "light";
 }
 
 // Tool annotations
 interface ToolAnnotations {
-  title?: string;
-  readOnlyHint?: boolean;
-  destructiveHint?: boolean;
-  idempotentHint?: boolean;
-  openWorldHint?: boolean;
+    title?: string;
+    readOnlyHint?: boolean;
+    destructiveHint?: boolean;
+    idempotentHint?: boolean;
+    openWorldHint?: boolean;
 }
 
 // Tool definition
 interface McpTool {
-  name: string;
-  title?: string;
-  description?: string;
-  inputSchema: Record<string, unknown>;
-  outputSchema?: Record<string, unknown>;
-  annotations?: ToolAnnotations;
-  icons?: McpIcon[];
-  _meta?: Record<string, unknown>;
+    name: string;
+    title?: string;
+    description?: string;
+    inputSchema: Record<string, unknown>;
+    outputSchema?: Record<string, unknown>;
+    annotations?: ToolAnnotations;
+    icons?: McpIcon[];
+    _meta?: Record<string, unknown>;
 }
 
 // Response base
 interface ResponseBase {
-  id: string;
-  result?: unknown;
-  error?: McpError;
+    id: string;
+    result?: unknown;
+    error?: McpError;
 }
 
 // Server info response
 interface ServerInfoResponse extends ResponseBase {
-  name: string;
-  version: string;
-  title?: string;
-  icons?: McpIcon[];
+    name: string;
+    version: string;
+    title?: string;
+    icons?: McpIcon[];
 }
 
 // Tools list response
 interface ToolsListResponse extends ResponseBase {
-  result: {
-    tools: McpTool[];
-  };
+    result: {
+        tools: McpTool[];
+    };
 }
 
 // Resource annotations
 interface Annotations {
-  audience?: Role[];
-  priority?: number;
+    audience?: Role[];
+    priority?: number;
 }
 
 type Role = "user" | "assistant";
 
 // Resource definition
 interface McpResource {
-  uri: string;
-  name: string;
-  description?: string;
-  mimeType?: string;
-  annotations?: Annotations;
-  icons?: McpIcon[];
-  _meta?: Record<string, unknown>;
+    uri: string;
+    name: string;
+    description?: string;
+    mimeType?: string;
+    annotations?: Annotations;
+    icons?: McpIcon[];
+    _meta?: Record<string, unknown>;
 }
 
 // Resources list request/response
 interface ResourcesListRequest extends RequestBase {
-  method: "resources_list";
+    method: "resources_list";
 }
 
 interface ResourcesListResponse extends ResponseBase {
-  result?: {
-    resources: McpResource[];
-  };
+    result?: {
+        resources: McpResource[];
+    };
 }
 
 // Resources read request/response
 interface ResourcesReadRequest extends RequestBase {
-  method: "resources_read";
-  uri: string;
+    method: "resources_read";
+    uri: string;
 }
 
 interface ResourcesReadResult {
-  uri: string;
-  mimeType: string;
-  content: unknown;
+    uri: string;
+    mimeType: string;
+    content: unknown;
 }
 
 interface ResourcesReadResponse extends ResponseBase {
-  result?: ResourcesReadResult;
+    result?: ResourcesReadResult;
 }
 
 // Resources subscribe/unsubscribe requests
 interface ResourcesSubscribeRequest extends RequestBase {
-  method: "resources_subscribe";
-  uri: string;
+    method: "resources_subscribe";
+    uri: string;
 }
 
 interface ResourcesUnsubscribeRequest extends RequestBase {
-  method: "resources_unsubscribe";
-  uri: string;
+    method: "resources_unsubscribe";
+    uri: string;
 }
 
 // Elicitation types
 interface ElicitationParams {
-  message: string;
-  mode: "form";
-  requestedSchema: Record<string, unknown>;
-  relatedToolCallId: string;
+    message: string;
+    mode: "form";
+    requestedSchema: Record<string, unknown>;
+    relatedToolCallId: string;
 }
 
 interface ElicitationRequest {
-  id: string;
-  method: "elicitation/create";
-  params: ElicitationParams;
+    id: string;
+    method: "elicitation/create";
+    params: ElicitationParams;
 }
 
 interface ElicitationResponse {
-  action: "accept" | "cancel" | "decline";
-  content?: Record<string, unknown>;
+    action: "accept" | "cancel" | "decline";
+    content?: Record<string, unknown>;
 }
 
 type ElicitationCallback = (params: ElicitationParams) => Promise<ElicitationResponse>;
@@ -1175,9 +1246,9 @@ type ElicitationCallback = (params: ElicitationParams) => Promise<ElicitationRes
 
 ```typescript
 interface Config {
-  transport: "http" | "stdio";
-  port: number;
-  enableNgrok: boolean;
+    transport: "http" | "stdio";
+    port: number;
+    enableNgrok: boolean;
 }
 ```
 
@@ -1189,7 +1260,7 @@ interface Config {
 
 ```
 ┌─────────┐     ┌─────────────┐      ┌───────────┐
-│ Bridge  │     │ StreamDeck  │      │MCP Client │
+│ Bridge  │     │  App (IPC)  │      │MCP Client │
 └────┬────┘     └──────┬──────┘      └─────┬─────┘
      │                 │                   │
      │──connect()─────►│                   │
@@ -1212,12 +1283,12 @@ interface Config {
 
 ```
 ┌─────────┐     ┌─────────────┐      ┌───────────┐
-│ Bridge  │     │ StreamDeck  │      │MCP Client │
+│ Bridge  │     │  App (IPC)  │      │MCP Client │
 └────┬────┘     └──────┬──────┘      └─────┬─────┘
      │                 │                   │
      │    (connection lost)                │
      │                 │                   │
-     │   (StreamDeck restarts)             │
+     │   (App restarts)                    │
      │                 │                   │
      │◄──signal ready──│                   │
      │──connect()─────►│                   │
@@ -1236,7 +1307,7 @@ interface Config {
 
 ```
 ┌─────────┐     ┌─────────────┐      ┌───────────┐      ┌──────┐
-│ Bridge  │     │ StreamDeck  │      │MCP Client │      │ User │
+│ Bridge  │     │  App (IPC)  │      │MCP Client │      │ User │
 └────┬────┘     └──────┬──────┘      └─────┬─────┘      └──┬───┘
      │                 │                   │               │
      │◄───────────────────────tools/call───│               │
@@ -1256,6 +1327,7 @@ interface Config {
 ```
 
 **Key Points:**
+
 - Elicitation occurs mid-tool-call when Stream Deck needs additional user input
 - The bridge holds a reference to the active MCP server during tool execution
 - The `elicitInput()` method on the MCP server is used to prompt the user

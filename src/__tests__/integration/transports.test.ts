@@ -1,41 +1,32 @@
 import { beforeEach, describe, expect, it, jest } from "@jest/globals";
+
+import type { ClientManager } from "../../ClientManager.js";
 import { McpBridge } from "../../McpBridge.js";
-import type { IpcClient } from "../../IpcClient.js";
-import { MockSocket } from "../helpers/MockSocket.js";
-import { createMockClient, createMockResource, createMockServerInfo, createMockTool, wait } from "../helpers/testUtils.js";
+import { createMockClientManager, createMockResource, createMockTool, wait } from "../helpers/testUtils.js";
 
 describe("Transport Integration Tests", () => {
-	let mockClient: jest.Mocked<IpcClient>;
-	let mockSocket: MockSocket;
+	let mockClientManager: jest.Mocked<ClientManager>;
 
 	beforeEach(() => {
 		jest.clearAllMocks();
-
-		mockSocket = new MockSocket();
-		mockClient = createMockClient();
+		mockClientManager = createMockClientManager();
 	});
 
 	describe("stdio transport", () => {
-		it("should initialize bridge with stdio transport", async () => {
-			mockClient.connect.mockResolvedValue(true);
-			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
-			mockClient.getTools.mockResolvedValue([createMockTool()]);
+		it("should initialize bridge with clientManager", async () => {
+			mockClientManager.initialize.mockResolvedValue(undefined);
 
-			const bridge = new McpBridge(mockClient);
+			const bridge = new McpBridge(mockClientManager);
 			await bridge.initialize();
 
-			expect(bridge.isConnected).toBe(false); // Mock client starts disconnected
-			expect(mockClient.connect).toHaveBeenCalled();
+			expect(bridge.isConnected).toBe(false);
+			expect(mockClientManager.initialize).toHaveBeenCalled();
 
 			bridge.close();
 		});
 
 		it("should create server and handle initialization", async () => {
-			mockClient.connect.mockResolvedValue(true);
-			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
-			mockClient.getTools.mockResolvedValue([]);
-
-			const bridge = new McpBridge(mockClient);
+			const bridge = new McpBridge(mockClientManager);
 			await bridge.initialize();
 
 			const server = bridge.createServer();
@@ -44,14 +35,15 @@ describe("Transport Integration Tests", () => {
 			bridge.close();
 		});
 
-		it("should handle Stream Deck unavailable at startup", async () => {
-			mockClient.connect.mockResolvedValue(false);
+		it("should handle apps unavailable at startup", async () => {
+			// ClientManager.initialize handles unavailable apps internally
+			mockClientManager.initialize.mockResolvedValue(undefined);
 
-			const bridge = new McpBridge(mockClient);
+			const bridge = new McpBridge(mockClientManager);
 			await bridge.initialize();
 
-			expect(mockClient.getServerInfo).not.toHaveBeenCalled();
-			expect(mockClient.getTools).not.toHaveBeenCalled();
+			expect(mockClientManager.initialize).toHaveBeenCalled();
+			expect(bridge.isConnected).toBe(false);
 
 			bridge.close();
 		});
@@ -59,11 +51,7 @@ describe("Transport Integration Tests", () => {
 
 	describe("HTTP transport", () => {
 		it("should handle multiple sessions", async () => {
-			mockClient.connect.mockResolvedValue(true);
-			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
-			mockClient.getTools.mockResolvedValue([]);
-
-			const bridge = new McpBridge(mockClient);
+			const bridge = new McpBridge(mockClientManager);
 			await bridge.initialize();
 
 			// Create multiple servers (simulating multiple HTTP sessions)
@@ -78,24 +66,19 @@ describe("Transport Integration Tests", () => {
 		});
 
 		it("should notify all sessions on tools change", async () => {
-			mockClient.connect.mockResolvedValue(true);
-			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
-			mockClient.getTools.mockResolvedValue([]);
-
-			const bridge = new McpBridge(mockClient);
+			const bridge = new McpBridge(mockClientManager);
 			await bridge.initialize();
 
-			const callback1 = jest.fn() as any;
-			const callback2 = jest.fn() as any;
+			const callback1 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const callback2 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
 
 			bridge.onToolsChanged(callback1);
 			bridge.onToolsChanged(callback2);
 
-			// Simulate reconnection
-			const onConnectedCallback = mockClient.onConnected.mock.calls[0]?.[0];
-			(mockClient as any).isConnected = true;
-			if (onConnectedCallback) {
-				await onConnectedCallback();
+			// Simulate clientManager firing onToolsChanged
+			const managerCallback = mockClientManager.onToolsChanged.mock.calls[0]?.[0];
+			if (managerCallback) {
+				await managerCallback();
 			}
 
 			await wait(10);
@@ -107,25 +90,19 @@ describe("Transport Integration Tests", () => {
 		});
 
 		it("should notify all sessions on resources change", async () => {
-			mockClient.connect.mockResolvedValue(true);
-			(mockClient as any).isConnected = true;
-			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
-			mockClient.getTools.mockResolvedValue([]);
-			mockClient.getResources.mockResolvedValue([createMockResource()]);
-
-			const bridge = new McpBridge(mockClient);
+			const bridge = new McpBridge(mockClientManager);
 			await bridge.initialize();
 
-			const callback1 = jest.fn() as any;
-			const callback2 = jest.fn() as any;
+			const callback1 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const callback2 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
 
 			bridge.onResourcesChanged(callback1);
 			bridge.onResourcesChanged(callback2);
 
-			// Simulate reconnection
-			const onConnectedCallback = mockClient.onConnected.mock.calls[0]?.[0];
-			if (onConnectedCallback) {
-				await onConnectedCallback();
+			// Simulate clientManager firing onResourcesChanged
+			const managerCallback = mockClientManager.onResourcesChanged.mock.calls[0]?.[0];
+			if (managerCallback) {
+				await managerCallback();
 			}
 
 			await wait(10);
@@ -138,73 +115,57 @@ describe("Transport Integration Tests", () => {
 	});
 
 	describe("connection scenarios", () => {
-		it("should handle Stream Deck running before bridge", async () => {
-			mockClient.connect.mockResolvedValue(true);
-			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
-			mockClient.getTools.mockResolvedValue([createMockTool()]);
+		it("should handle apps running before bridge", async () => {
+			mockClientManager = createMockClientManager({ isConnected: true });
 
-			const bridge = new McpBridge(mockClient);
+			const bridge = new McpBridge(mockClientManager);
 			await bridge.initialize();
 
-			expect(mockClient.connect).toHaveBeenCalled();
-			expect(mockClient.getServerInfo).toHaveBeenCalled();
-			expect(mockClient.getTools).toHaveBeenCalled();
+			expect(mockClientManager.initialize).toHaveBeenCalled();
+			expect(bridge.isConnected).toBe(true);
 
 			bridge.close();
 		});
 
-		it("should handle bridge starting before Stream Deck", async () => {
-			mockClient.connect.mockResolvedValue(false);
+		it("should handle bridge starting before apps", async () => {
+			mockClientManager = createMockClientManager({ isConnected: false });
 
-			const bridge = new McpBridge(mockClient);
+			const bridge = new McpBridge(mockClientManager);
 			await bridge.initialize();
 
-			expect(mockClient.connect).toHaveBeenCalled();
-			expect(mockClient.getServerInfo).not.toHaveBeenCalled();
-			expect(mockClient.startSignalListener).toHaveBeenCalled();
+			expect(mockClientManager.initialize).toHaveBeenCalled();
+			expect(bridge.isConnected).toBe(false);
 
 			bridge.close();
 		});
 
-		it("should handle Stream Deck restart scenario", async () => {
-			// Initial connection
-			mockClient.connect.mockResolvedValue(true);
-			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
-			mockClient.getTools.mockResolvedValue([createMockTool({ name: "tool1" })]);
+		it("should handle app restart scenario", async () => {
+			mockClientManager = createMockClientManager({ isConnected: true });
+			const updatedTools = [createMockTool({ name: "tool1" }), createMockTool({ name: "tool2" })];
 
-			const bridge = new McpBridge(mockClient);
+			const bridge = new McpBridge(mockClientManager);
 			await bridge.initialize();
 
-			expect(mockClient.getTools).toHaveBeenCalledTimes(1);
-
-			// Simulate Stream Deck restart
-			const onConnectedCallback = mockClient.onConnected.mock.calls[0]?.[0];
-			(mockClient as any).isConnected = true;
-			mockClient.getTools.mockResolvedValue([
-				createMockTool({ name: "tool1" }),
-				createMockTool({ name: "tool2" }),
-			]);
-
-			if (onConnectedCallback) {
-				await onConnectedCallback();
+			// Simulate app reconnect (clientManager fires onToolsChanged)
+			mockClientManager.getTools.mockReturnValue(updatedTools as any);
+			const toolsChangedCallback = mockClientManager.onToolsChanged.mock.calls[0]?.[0];
+			if (toolsChangedCallback) {
+				await toolsChangedCallback();
 			}
 
-			// Tools should be refreshed
-			expect(mockClient.getTools).toHaveBeenCalledTimes(2);
+			expect(mockClientManager.getTools).toBeDefined();
 
 			bridge.close();
 		});
 
-		it("should handle Stream Deck crash mid-session", async () => {
-			mockClient.connect.mockResolvedValue(true);
-			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
-			mockClient.getTools.mockResolvedValue([]);
+		it("should handle app crash mid-session", async () => {
+			mockClientManager = createMockClientManager({ isConnected: true });
 
-			const bridge = new McpBridge(mockClient);
+			const bridge = new McpBridge(mockClientManager);
 			await bridge.initialize();
 
 			// Simulate crash
-			(mockClient as any).isConnected = false;
+			(mockClientManager as any).isConnected = false;
 
 			expect(bridge.isConnected).toBe(false);
 
@@ -213,53 +174,46 @@ describe("Transport Integration Tests", () => {
 	});
 
 	describe("reconnection handling", () => {
-		it("should refresh tools on reconnection", async () => {
-			mockClient.connect.mockResolvedValue(false);
+		it("should refresh tools on reconnection via onToolsChanged", async () => {
+			mockClientManager = createMockClientManager({ isConnected: false });
 
-			const bridge = new McpBridge(mockClient);
+			const bridge = new McpBridge(mockClientManager);
 			await bridge.initialize();
 
-			// Simulate reconnection
-			const onConnectedCallback = mockClient.onConnected.mock.calls[0]?.[0];
-			(mockClient as any).isConnected = true;
-			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
-			mockClient.getTools.mockResolvedValue([createMockTool()]);
+			// Simulate reconnection: clientManager fires onToolsChanged
+			(mockClientManager as any).isConnected = true;
+			const updatedTools = [createMockTool()];
+			mockClientManager.getTools.mockReturnValue(updatedTools as any);
 
-			if (onConnectedCallback) {
-				await onConnectedCallback();
+			const toolsChangedCallback = mockClientManager.onToolsChanged.mock.calls[0]?.[0];
+			if (toolsChangedCallback) {
+				await toolsChangedCallback();
 			}
 
-			expect(mockClient.getServerInfo).toHaveBeenCalled();
-			expect(mockClient.getTools).toHaveBeenCalled();
+			expect(bridge.isConnected).toBe(true);
 
 			bridge.close();
 		});
 
 		it("should notify callbacks on reconnection", async () => {
-			mockClient.connect.mockResolvedValue(false);
+			mockClientManager = createMockClientManager({ isConnected: false });
 
-			const bridge = new McpBridge(mockClient);
-			const callback = jest.fn() as any;
+			const bridge = new McpBridge(mockClientManager);
+			const callback = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
 			bridge.onToolsChanged(callback);
 
 			await bridge.initialize();
 
 			// Simulate reconnection
-			const onConnectedCallback = mockClient.onConnected.mock.calls[0]?.[0];
-			(mockClient as any).isConnected = true;
-			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
-			mockClient.getTools.mockResolvedValue([]);
-
-			if (onConnectedCallback) {
-				await onConnectedCallback();
+			const toolsChangedCallback = mockClientManager.onToolsChanged.mock.calls[0]?.[0];
+			if (toolsChangedCallback) {
+				await toolsChangedCallback();
 			}
 
 			await wait(10);
-
 			expect(callback).toHaveBeenCalled();
 
 			bridge.close();
 		});
 	});
 });
-

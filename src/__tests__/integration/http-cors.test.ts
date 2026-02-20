@@ -2,25 +2,21 @@ import { afterAll, beforeAll, describe, expect, it } from "@jest/globals";
 import type { Server } from "node:http";
 
 import { McpBridge } from "../../McpBridge.js";
-import type { IpcClient } from "../../IpcClient.js";
 import { createHttpTransportApp, type SessionData } from "../../transports/http.js";
-import { createMockClient, createMockServerInfo, createMockTool } from "../helpers/testUtils.js";
+import { createMockClientManager, createMockTool } from "../helpers/testUtils.js";
 
 describe("HTTP CORS Configuration Tests", () => {
 	let server: Server;
 	let baseUrl: string;
 	let sessions: Map<string, SessionData>;
-	let mockClient: jest.Mocked<IpcClient>;
 	let bridge: McpBridge;
 	let allowedOrigins: string[];
 
 	beforeAll(async () => {
-		mockClient = createMockClient({ isConnected: true });
-		mockClient.connect.mockResolvedValue(true);
-		mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
-		mockClient.getTools.mockResolvedValue([createMockTool()]);
+		const mockClientManager = createMockClientManager({ isConnected: true });
+		mockClientManager.getTools.mockReturnValue([createMockTool()] as any);
 
-		bridge = new McpBridge(mockClient);
+		bridge = new McpBridge(mockClientManager);
 		await bridge.initialize();
 
 		sessions = new Map<string, SessionData>();
@@ -183,10 +179,7 @@ describe("HTTP CORS Configuration Tests", () => {
 			});
 
 			expect(response.status).toBe(200);
-			expect(response.headers.get("access-control-allow-origin")).toBe(
-				"https://another-domain.example.com",
-			);
+			expect(response.headers.get("access-control-allow-origin")).toBe("https://another-domain.example.com");
 		});
 	});
 });
-

@@ -9,64 +9,54 @@ import {
 	type ListToolsResult,
 	ReadResourceRequestSchema,
 	type ReadResourceResult,
-	type Resource,
 	SubscribeRequestSchema,
-	type Tool,
 	UnsubscribeRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
-import { DEFAULT_SERVER_INFO, SDK_NOTIFICATIONS, SIGNAL_SOCKET_PATH, SOCKET_PATH } from "./constants.js";
-import { IpcClient } from "./IpcClient.js";
-import type { ElicitationParams, ElicitationResponse, ServerInfo } from "./types.js";
-import { convertToMcpResources, convertToMcpTools, log } from "./utils.js";
+import { ClientManager } from "./ClientManager.js";
+import { SDK_NOTIFICATIONS } from "./constants.js";
+import type { ElicitationParams } from "./types.js";
+import { log } from "./utils.js";
 
 /**
- * Bridge between MCP protocol and Stream Deck IPC.
+ * Bridge between MCP protocol and IPC-connected apps.
  *
- * This class acts as a proxy between MCP clients and the Stream Deck application,
- * dynamically discovering and exposing Stream Deck tools through the MCP protocol.
+ * This class acts as a proxy between MCP clients and one or more IPC-connected
+ * applications (e.g. Stream Deck), dynamically discovering and exposing their
+ * tools and resources through the MCP protocol.
  */
 export class McpBridge {
 	/** Map of correlation IDs to active MCP servers for routing elicitation requests. */
 	private activeToolCalls: Map<string, McpServer> = new Map();
-	private cachedResources: Resource[] = [];
-	private cachedTools: Tool[] = [];
-	private client: IpcClient;
+	private readonly clientManager: ClientManager;
 	private notificationForwardCallbacks: Array<(method: string, params?: unknown) => Promise<void>> = [];
 	private notifyResourcesChangedCallbacks: Array<() => Promise<void>> = [];
 	private notifyToolsChangedCallbacks: Array<() => Promise<void>> = [];
 	private resourceSubscriptions: Map<McpServer, Set<string>> = new Map();
-	private serverInfo: ServerInfo = DEFAULT_SERVER_INFO;
 
 	/**
 	 * Creates a new MCP Bridge instance.
-	 * @param client - Optional IpcClient instance for testing.
+	 * @param clientManager - Optional ClientManager instance for testing.
 	 */
-	public constructor(client?: IpcClient) {
-		this.client =
-			client ??
-			new IpcClient({
-				name: "streamdeck",
-				signalSocketPath: SIGNAL_SOCKET_PATH,
-				socketPath: SOCKET_PATH,
-			});
-		this.setupClientCallbacks();
+	public constructor(clientManager?: ClientManager) {
+		this.clientManager = clientManager ?? new ClientManager();
+		this.setupClientManagerCallbacks();
 	}
 
 	/**
-	 * Whether the Stream Deck client is connected.
+	 * Whether any managed client is connected.
 	 */
 	public get isConnected(): boolean {
-		return this.client.isConnected;
+		return this.clientManager.isConnected;
 	}
 
 	/**
-	 * Closes the bridge and disconnects from Stream Deck.
+	 * Closes the bridge and disconnects all managed clients.
 	 */
 	public close(): void {
 		this.activeToolCalls.clear();
 		this.resourceSubscriptions.clear();
-		this.client.disconnect();
+		this.clientManager.close();
 	}
 
 	/**
@@ -75,12 +65,13 @@ export class McpBridge {
 	 * @returns Configured MCP Server.
 	 */
 	public createServer(): McpServer {
+		const serverInfo = this.clientManager.getServerInfo();
 		const mcpServer = new McpServer(
 			{
-				name: this.serverInfo.name,
-				version: this.serverInfo.version,
-				title: this.serverInfo.title,
-				icons: this.serverInfo.icons,
+				name: serverInfo.name,
+				version: serverInfo.version,
+				title: serverInfo.title,
+				icons: serverInfo.icons,
 			},
 			{
 				capabilities: {
@@ -95,23 +86,21 @@ export class McpBridge {
 	}
 
 	/**
-	 * Initializes the bridge by connecting to Stream Deck.
+	 * Initializes the bridge by connecting all managed clients.
 	 */
 	public async initialize(): Promise<void> {
 		log("Initializing MCP Bridge...");
+		await this.clientManager.initialize();
+		log("MCP Bridge initialized.");
+	}
 
-		const connected = await this.client.connect();
-
-		if (connected) {
-			log("Connected to Stream Deck");
-			await this.refreshServerInfo();
-			await this.refreshTools();
-			await this.refreshResources();
-		} else {
-			log("Stream Deck not available, starting in disconnected mode");
-		}
-
-		this.client.startSignalListener();
+	/**
+	 * Registers a callback to be invoked when a notification from a connected app needs to be forwarded.
+	 * This allows MCP clients to receive custom notifications from connected apps.
+	 * @param callback - Async callback function receiving the method name and optional params.
+	 */
+	public onClientNotification(callback: (method: string, params?: unknown) => Promise<void>): void {
+		this.notificationForwardCallbacks.push(callback);
 	}
 
 	/**
@@ -120,15 +109,6 @@ export class McpBridge {
 	 */
 	public onResourcesChanged(callback: () => Promise<void>): void {
 		this.notifyResourcesChangedCallbacks.push(callback);
-	}
-
-	/**
-	 * Registers a callback to be invoked when a notification from Stream Deck needs to be forwarded.
-	 * This allows MCP clients to receive custom notifications from Stream Deck.
-	 * @param callback - Async callback function receiving the method name and optional params.
-	 */
-	public onStreamDeckNotification(callback: (method: string, params?: unknown) => Promise<void>): void {
-		this.notificationForwardCallbacks.push(callback);
 	}
 
 	/**
@@ -168,24 +148,17 @@ export class McpBridge {
 		}
 	}
 
-	private async handleStreamDeckNotification(method: string, params?: unknown): Promise<void> {
-		log(`Received notification from Stream Deck: ${method}`, params);
+	private async handleClientNotification(method: string, params?: unknown): Promise<void> {
+		log(`Received notification from client: ${method}`, params);
 
 		switch (method) {
 			case SDK_NOTIFICATIONS.TOOLS_LIST_CHANGED:
-				// Stream Deck notified that tools have changed, refresh and notify MCP clients
-				await this.refreshTools();
 				await this.notifyToolsChanged();
 				break;
 			case SDK_NOTIFICATIONS.RESOURCES_LIST_CHANGED:
-				// Stream Deck notified that resources list has changed, refresh and notify MCP clients
-				await this.refreshResources();
 				await this.notifyResourcesChanged();
 				break;
 			case SDK_NOTIFICATIONS.RESOURCES_UPDATED: {
-				// Stream Deck notified that a specific resource was updated
-				// Only forward if client has subscribed to this resource
-				await this.refreshResources();
 				const resourceParams = params as { uri: string } | undefined;
 				if (resourceParams?.uri) {
 					await this.forwardResourceUpdatedIfSubscribed(resourceParams.uri);
@@ -219,58 +192,23 @@ export class McpBridge {
 		}
 	}
 
-	private async refreshResources(): Promise<void> {
-		try {
-			const resources = await this.client.getResources();
-			this.cachedResources = convertToMcpResources(resources);
-			log(`Discovered ${this.cachedResources.length} resources`);
-		} catch (error) {
-			log("Failed to refresh resources:", error);
-		}
-	}
-
-	private async refreshServerInfo(): Promise<void> {
-		try {
-			const info = await this.client.getServerInfo();
-			if (info) {
-				this.serverInfo = info;
-				log("Server info updated");
-			}
-		} catch (error) {
-			log("Failed to refresh server info:", error);
-		}
-	}
-
-	private async refreshTools(): Promise<void> {
-		try {
-			const tools = await this.client.getTools();
-			this.cachedTools = convertToMcpTools(tools);
-			log(`Discovered ${this.cachedTools.length} tools`);
-		} catch (error) {
-			log("Failed to refresh tools:", error);
-		}
-	}
-
 	private registerHandlers(mcpServer: McpServer): void {
 		// Access the low-level server for custom request handlers
 		const server = mcpServer.server;
 
-		server.setRequestHandler(ListToolsRequestSchema, async (): Promise<ListToolsResult> => {
-			if (!this.client.isConnected) {
+		server.setRequestHandler(ListToolsRequestSchema, (): ListToolsResult => {
+			if (!this.clientManager.isConnected) {
 				return { tools: [] };
 			}
-			if (this.cachedTools.length === 0) {
-				await this.refreshTools();
-			}
-			return { tools: this.cachedTools };
+			return { tools: this.clientManager.getTools() };
 		});
 
 		server.setRequestHandler(CallToolRequestSchema, async (request, extra): Promise<CallToolResult> => {
 			const { name, arguments: args = {} } = request.params;
 
-			if (!this.client.isConnected) {
+			if (!this.clientManager.isConnected) {
 				return {
-					content: [{ type: "text", text: "Stream Deck is not connected" }],
+					content: [{ type: "text", text: "No apps connected" }],
 					isError: true,
 				};
 			}
@@ -283,7 +221,7 @@ export class McpBridge {
 			this.activeToolCalls.set(correlationId, mcpServer);
 
 			try {
-				const response = await this.client.callTool(name, args, correlationId);
+				const response = await this.clientManager.callTool(name, args, correlationId);
 
 				if (response.error) {
 					return {
@@ -316,26 +254,23 @@ export class McpBridge {
 		});
 
 		// Resource handlers
-		server.setRequestHandler(ListResourcesRequestSchema, async (): Promise<ListResourcesResult> => {
-			if (!this.client.isConnected) {
+		server.setRequestHandler(ListResourcesRequestSchema, (): ListResourcesResult => {
+			if (!this.clientManager.isConnected) {
 				return { resources: [] };
 			}
-			if (this.cachedResources.length === 0) {
-				await this.refreshResources();
-			}
-			return { resources: this.cachedResources };
+			return { resources: this.clientManager.getResources() };
 		});
 
 		server.setRequestHandler(ReadResourceRequestSchema, async (request): Promise<ReadResourceResult> => {
 			const { uri } = request.params;
 
-			if (!this.client.isConnected) {
-				throw new Error("Stream Deck is not connected");
+			if (!this.clientManager.isConnected) {
+				throw new Error("No apps connected");
 			}
 
 			try {
-				const result = await this.client.readResource(uri);
-				// Convert Stream Deck format (single resource with content object)
+				const result = await this.clientManager.readResource(uri);
+				// Convert IPC format (single resource with content object)
 				// to MCP format (contents array with text/blob)
 				const contents = [
 					{
@@ -354,8 +289,8 @@ export class McpBridge {
 		server.setRequestHandler(SubscribeRequestSchema, async (request): Promise<Record<string, never>> => {
 			const { uri } = request.params;
 
-			if (!this.client.isConnected) {
-				throw new Error("Stream Deck is not connected");
+			if (!this.clientManager.isConnected) {
+				throw new Error("No apps connected");
 			}
 
 			try {
@@ -375,8 +310,8 @@ export class McpBridge {
 		server.setRequestHandler(UnsubscribeRequestSchema, async (request): Promise<Record<string, never>> => {
 			const { uri } = request.params;
 
-			if (!this.client.isConnected) {
-				throw new Error("Stream Deck is not connected");
+			if (!this.clientManager.isConnected) {
+				throw new Error("No apps connected");
 			}
 
 			try {
@@ -395,29 +330,21 @@ export class McpBridge {
 		});
 	}
 
-	private setupClientCallbacks(): void {
-		this.client.onConnected(async () => {
-			log("Stream Deck connected, refreshing server info and tools...");
-			await this.refreshServerInfo();
-			await this.refreshTools();
+	private setupClientManagerCallbacks(): void {
+		this.clientManager.onToolsChanged(async () => {
 			await this.notifyToolsChanged();
-			await this.refreshResources();
+		});
+
+		this.clientManager.onResourcesChanged(async () => {
 			await this.notifyResourcesChanged();
 		});
 
-		this.client.onDisconnected(async () => {
-			log("Stream Deck disconnected, clearing tools...");
-			this.cachedTools = [];
-			await this.notifyToolsChanged();
-			await this.notifyResourcesChanged();
+		this.clientManager.onNotification((method, params) => {
+			void this.handleClientNotification(method, params);
 		});
 
-		this.client.onNotification((method, params) => {
-			void this.handleStreamDeckNotification(method, params);
-		});
-
-		// Handle elicitation requests from Stream Deck
-		this.client.onElicitation(async (params: ElicitationParams): Promise<ElicitationResponse> => {
+		// Handle elicitation requests from connected apps
+		this.clientManager.onElicitation(async (params: ElicitationParams) => {
 			const { relatedToolCallId } = params;
 
 			// Look up the correct MCP server using the correlation ID
@@ -430,7 +357,7 @@ export class McpBridge {
 			try {
 				log(`Forwarding elicitation to MCP client: ${params}`);
 
-				// Cast the schema - Stream Deck provides a JSON Schema object that matches MCP's expected format
+				// Cast the schema - connected app provides a JSON Schema object that matches MCP's expected format
 				const result = await targetMcpServer.server.elicitInput({
 					mode: params.mode,
 					message: params.message,
@@ -492,7 +419,7 @@ export async function createConnectedBridge(transport: Transport): Promise<McpBr
 		}
 	});
 
-	bridge.onStreamDeckNotification(async (method, params) => {
+	bridge.onClientNotification(async (method, params) => {
 		try {
 			await mcpServer.server.notification({
 				method,
@@ -500,7 +427,7 @@ export async function createConnectedBridge(transport: Transport): Promise<McpBr
 				params: params as Record<string, unknown> | undefined,
 			});
 		} catch (error) {
-			log("Failed to forward Stream Deck notification:", error);
+			log("Failed to forward client notification:", error);
 		}
 	});
 

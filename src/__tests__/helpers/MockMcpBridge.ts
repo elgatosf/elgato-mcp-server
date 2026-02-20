@@ -8,13 +8,13 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
  * When adding new public methods to McpBridge, ensure they are also added here.
  *
  * Public methods from McpBridge that must be mocked:
- * - constructor(client?: IpcClient)
+ * - constructor(clientManager?: ClientManager)
  * - get isConnected(): boolean
  * - close(): void
  * - createServer(): McpServer
  * - initialize(): Promise<void>
+ * - onClientNotification(callback: (method: string, params?: unknown) => Promise<void>): void
  * - onResourcesChanged(callback: () => Promise<void>): void
- * - onStreamDeckNotification(callback: (method: string, params?: unknown) => Promise<void>): void
  * - onToolsChanged(callback: () => Promise<void>): void
  *
  * @see src/McpBridge.ts for the real implementation
@@ -35,9 +35,7 @@ export class MockMcpBridge {
 	public createServer = jest.fn<() => McpServer>();
 	public onToolsChanged = jest.fn<(callback: () => Promise<void>) => void>();
 	public onResourcesChanged = jest.fn<(callback: () => Promise<void>) => void>();
-	public onStreamDeckNotification = jest.fn<
-		(callback: (method: string, params?: unknown) => Promise<void>) => void
-	>();
+	public onClientNotification = jest.fn<(callback: (method: string, params?: unknown) => Promise<void>) => void>();
 }
 
 /**
@@ -62,9 +60,7 @@ export function createMockMcpBridge(
 		createServer: jest.Mock<() => McpServer>;
 		onToolsChanged: jest.Mock<(callback: () => Promise<void>) => void>;
 		onResourcesChanged: jest.Mock<(callback: () => Promise<void>) => void>;
-		onStreamDeckNotification: jest.Mock<
-			(callback: (method: string, params?: unknown) => Promise<void>) => void
-		>;
+		onClientNotification: jest.Mock<(callback: (method: string, params?: unknown) => Promise<void>) => void>;
 	}> = {},
 ): MockMcpBridge {
 	const mock = new MockMcpBridge();
@@ -87,10 +83,9 @@ export function createMockMcpBridge(
 	if (overrides.onResourcesChanged) {
 		mock.onResourcesChanged = overrides.onResourcesChanged;
 	}
-	if (overrides.onStreamDeckNotification) {
-		mock.onStreamDeckNotification = overrides.onStreamDeckNotification;
+	if (overrides.onClientNotification) {
+		mock.onClientNotification = overrides.onClientNotification;
 	}
 
 	return mock;
 }
-

@@ -1,11 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, jest } from "@jest/globals";
 import type { Server } from "node:http";
 
-import { McpBridge } from "../../McpBridge.js";
-import type { IpcClient } from "../../IpcClient.js";
-import { createHttpTransportApp, type SessionData } from "../../transports/http.js";
-import { createMockClient, createMockServerInfo, createMockTool } from "../helpers/testUtils.js";
 import { MCP_ERROR_CODES } from "../../constants.js";
+import { McpBridge } from "../../McpBridge.js";
+import { createHttpTransportApp, type SessionData } from "../../transports/http.js";
+import { createMockClientManager, createMockTool } from "../helpers/testUtils.js";
 
 interface JsonRpcResponse {
 	jsonrpc: string;
@@ -18,16 +17,13 @@ describe("HTTP Session Lifecycle Integration Tests", () => {
 	let server: Server;
 	let baseUrl: string;
 	let sessions: Map<string, SessionData>;
-	let mockClient: jest.Mocked<IpcClient>;
 	let bridge: McpBridge;
 
 	beforeAll(async () => {
-		mockClient = createMockClient({ isConnected: true });
-		mockClient.connect.mockResolvedValue(true);
-		mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
-		mockClient.getTools.mockResolvedValue([createMockTool()]);
+		const mockClientManager = createMockClientManager({ isConnected: true });
+		mockClientManager.getTools.mockReturnValue([createMockTool()] as any);
 
-		bridge = new McpBridge(mockClient);
+		bridge = new McpBridge(mockClientManager);
 		await bridge.initialize();
 
 		sessions = new Map<string, SessionData>();

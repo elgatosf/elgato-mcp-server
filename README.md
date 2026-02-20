@@ -14,6 +14,7 @@ MCP Client <--MCP Transport--> Bridge <--Unix Socket/Named Pipe--> Stream Deck
 ```
 
 **Key Features:**
+
 - 🔌 **Dynamic Tool Discovery** — Automatically discovers and exposes Stream Deck tools via MCP
 - 🚀 **Dual Transport Support** — stdio (for Claude Desktop) and HTTP (for web clients)
 - 🌐 **ngrok Integration** — Optional public tunnel for remote access
@@ -76,11 +77,11 @@ Add the following to your Claude Desktop configuration file:
 
 ```json
 {
-  "mcpServers": {
-    "streamdeck": {
-      "command": "mcp-server-streamdeck"
+    "mcpServers": {
+        "streamdeck": {
+            "command": "mcp-server-streamdeck"
+        }
     }
-  }
 }
 ```
 
@@ -88,12 +89,12 @@ Add the following to your Claude Desktop configuration file:
 
 When running in HTTP mode, the following endpoints are available:
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/mcp` | POST | MCP request endpoint |
-| `/mcp` | GET | Server-Sent Events (SSE) for streaming |
-| `/mcp` | DELETE | Close session |
-| `/health` | GET | Health check endpoint |
+| Endpoint  | Method | Description                            |
+| --------- | ------ | -------------------------------------- |
+| `/mcp`    | POST   | MCP request endpoint                   |
+| `/mcp`    | GET    | Server-Sent Events (SSE) for streaming |
+| `/mcp`    | DELETE | Close session                          |
+| `/health` | GET    | Health check endpoint                  |
 
 ## Development
 
@@ -121,18 +122,18 @@ pnpm start
 
 ### Scripts
 
-| Command | Description |
-|---------|-------------|
-| `pnpm build` | Compile TypeScript to JavaScript |
-| `pnpm start` | Run the bridge with stdio transport |
-| `pnpm http` | Run the bridge with HTTP transport |
-| `pnpm ngrok` | Run with HTTP + ngrok tunnel |
-| `pnpm lint` | Run ESLint |
-| `pnpm lint:fix` | Fix formatting with Prettier |
-| `pnpm test` | Run all tests |
-| `pnpm test:unit` | Run unit tests only |
-| `pnpm test:integration` | Run integration tests only |
-| `pnpm test:coverage` | Run tests with coverage report |
+| Command                 | Description                         |
+| ----------------------- | ----------------------------------- |
+| `pnpm build`            | Compile TypeScript to JavaScript    |
+| `pnpm start`            | Run the bridge with stdio transport |
+| `pnpm http`             | Run the bridge with HTTP transport  |
+| `pnpm ngrok`            | Run with HTTP + ngrok tunnel        |
+| `pnpm lint`             | Run ESLint                          |
+| `pnpm lint:fix`         | Fix formatting with Prettier        |
+| `pnpm test`             | Run all tests                       |
+| `pnpm test:unit`        | Run unit tests only                 |
+| `pnpm test:integration` | Run integration tests only          |
+| `pnpm test:coverage`    | Run tests with coverage report      |
 
 ### Testing
 
@@ -140,13 +141,14 @@ The project includes comprehensive unit and integration tests. For detailed info
 
 ## Architecture
 
-The bridge consists of three main components:
+The bridge consists of four main components:
 
-1. **StreamDeckClient** — IPC client for communicating with Stream Deck via Unix socket (macOS/Linux) or named pipe (Windows). Handles connection lifecycle, message parsing, and notification forwarding.
-2. **McpBridge** — Protocol translator between MCP and Stream Deck IPC. Provides two initialization patterns:
-   - `createInitializedBridge()` — For manual transport management (HTTP with multiple sessions)
-   - `createConnectedBridge()` — For single transport scenarios (stdio)
-3. **Transport Layer** — stdio or HTTP transport for MCP client communication
+1. **IpcClient** — IPC client for communicating with a single app (e.g. Stream Deck) via Unix socket (macOS/Linux) or named pipe (Windows). Handles connection lifecycle, message parsing, and notification forwarding.
+2. **ClientManager** — Manages multiple `IpcClient` instances (one per known app). Aggregates tools and resources with `appname__` prefixes and routes tool calls to the correct client.
+3. **McpBridge** — Protocol translator between MCP and the `ClientManager`. Provides two initialization patterns:
+    - `createInitializedBridge()` — For manual transport management (HTTP with multiple sessions)
+    - `createConnectedBridge()` — For single transport scenarios (stdio)
+4. **Transport Layer** — stdio or HTTP transport for MCP client communication
 
 For detailed technical information, see [TECHNICAL_SPECIFICATION.md](./TECHNICAL_SPECIFICATION.md).
 
@@ -168,4 +170,3 @@ See [LICENSE](./LICENSE) for details.
 - [npm Package](https://www.npmjs.com/package/@elgato/streamdeck-mcp)
 - [Issue Tracker](https://github.com/elgatosf/streamdeck-mcp/issues)
 - [Elgato](https://www.elgato.com)
-

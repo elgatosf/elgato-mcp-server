@@ -253,7 +253,7 @@ export async function startHttpTransport(options: HttpTransportOptions = {}): Pr
 		}
 	});
 
-	bridge.onStreamDeckNotification(async (method, params) => {
+	bridge.onClientNotification(async (method, params) => {
 		for (const [sessionId, session] of sessions) {
 			try {
 				await session.server.server.notification({

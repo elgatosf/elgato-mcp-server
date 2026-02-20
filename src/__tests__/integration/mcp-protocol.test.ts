@@ -1,30 +1,25 @@
 import { beforeEach, describe, expect, it, jest } from "@jest/globals";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { CallToolRequest, ListToolsRequest } from "@modelcontextprotocol/sdk/types.js";
+
+import type { ClientManager } from "../../ClientManager.js";
 import { McpBridge } from "../../McpBridge.js";
-import type { IpcClient } from "../../IpcClient.js";
-import { MockSocket } from "../helpers/MockSocket.js";
 import { MockTransport } from "../helpers/MockTransport.js";
 import {
 	createMockCallToolResponse,
-	createMockClient,
+	createMockClientManager,
 	createMockErrorResponse,
 	createMockResource,
-	createMockServerInfo,
 	createMockTool,
 	wait,
 } from "../helpers/testUtils.js";
 
 describe("MCP Protocol Integration Tests", () => {
 	let bridge: McpBridge;
-	let mockClient: jest.Mocked<IpcClient>;
-	let mockSocket: MockSocket;
+	let mockClientManager: jest.Mocked<ClientManager>;
 
 	beforeEach(() => {
 		jest.clearAllMocks();
-
-		mockSocket = new MockSocket();
-		mockClient = createMockClient({ isConnected: true });
+		mockClientManager = createMockClientManager({ isConnected: true });
 	});
 
 	afterEach(() => {
@@ -32,344 +27,230 @@ describe("MCP Protocol Integration Tests", () => {
 	});
 
 	describe("tools/list endpoint", () => {
-		it("should return cached tools when connected", async () => {
+		it("should return tools from clientManager when connected", async () => {
 			const tools = [createMockTool({ name: "tool1" }), createMockTool({ name: "tool2" })];
+			mockClientManager.getTools.mockReturnValue(tools as any);
 
-			mockClient.connect.mockResolvedValue(true);
-			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
-			mockClient.getTools.mockResolvedValue(tools);
+			bridge = new McpBridge(mockClientManager);
 
-			bridge = new McpBridge(mockClient);
-			await bridge.initialize();
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
 
-			// The server should have tools cached
-			expect(mockClient.getTools).toHaveBeenCalled();
+			transport.simulateIncomingMessage({ jsonrpc: "2.0" as const, id: 1, method: "tools/list", params: {} });
+			const response = await transport.waitForOutgoingMessage();
+
+			expect(response).toHaveProperty("result");
+			expect((response as any).result.tools).toHaveLength(2);
 		});
 
 		it("should return empty tools when disconnected", async () => {
-			mockClient.connect.mockResolvedValue(false);
+			mockClientManager = createMockClientManager({ isConnected: false });
+			bridge = new McpBridge(mockClientManager);
 
-			bridge = new McpBridge(mockClient);
-			await bridge.initialize();
-			// Should not attempt to fetch tools when disconnected
-			expect(mockClient.getTools).not.toHaveBeenCalled();
-		});
-
-		it("should return empty tools when disconnected even if cache was populated", async () => {
-			// Phase 1: Connect and populate cache
-			mockClient.connect.mockResolvedValue(true);
-			(mockClient as any).isConnected = true;
-			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
-			const tools = [
-				createMockTool({ name: "cached_tool_1" }),
-				createMockTool({ name: "cached_tool_2" }),
-			];
-			mockClient.getTools.mockResolvedValue(tools);
-
-			bridge = new McpBridge(mockClient);
-			await bridge.initialize();
-
-			// Verify cache was populated
-			expect(mockClient.getTools).toHaveBeenCalledTimes(1);
-			expect(bridge.isConnected).toBe(true);
-
-			// Phase 2: Disconnect after cache is populated
-			(mockClient as any).isConnected = false;
-			expect(bridge.isConnected).toBe(false);
-
-			// Phase 3: Create server - handlers respect disconnected state
-			const server = bridge.createServer();
-			expect(server).toBeDefined();
-
-			// Note: Full handler invocation testing would require MockTransport
-			// For now, we verify the setup and rely on the handler implementation
-			// checking this.client.isConnected (line 140 in McpBridge.ts)
-
-			// The handler at McpBridge.ts:139-147 checks isConnected before
-			// returning cachedTools, ensuring disconnected state returns []
-			expect(mockClient.getTools).toHaveBeenCalledTimes(1); // No additional calls
-		});
-
-		it("should return empty tools when disconnected even if cache was populated (E2E)", async () => {
-			// Phase 1: Connect and populate cache
-			mockClient.connect.mockResolvedValue(true);
-			(mockClient as any).isConnected = true;
-			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
-			const tools = [
-				createMockTool({ name: "cached_tool_1" }),
-				createMockTool({ name: "cached_tool_2" }),
-			];
-			mockClient.getTools.mockResolvedValue(tools);
-
-			bridge = new McpBridge(mockClient);
-			await bridge.initialize();
-
-			expect(mockClient.getTools).toHaveBeenCalledTimes(1);
-			expect(bridge.isConnected).toBe(true);
-
-			// Phase 2: Disconnect after cache is populated
-			(mockClient as any).isConnected = false;
-			expect(bridge.isConnected).toBe(false);
-
-			// Phase 3: Create server and connect mock transport
 			const server = bridge.createServer();
 			const transport = new MockTransport();
 			await server.connect(transport);
 
-			// Phase 4: Send tools/list request
-			const listToolsRequest = {
-				jsonrpc: "2.0" as const,
-				id: 1,
-				method: "tools/list",
-				params: {},
-			};
-
-			transport.simulateIncomingMessage(listToolsRequest);
-
-			// Phase 5: Wait for and verify response
+			transport.simulateIncomingMessage({ jsonrpc: "2.0" as const, id: 1, method: "tools/list", params: {} });
 			const response = await transport.waitForOutgoingMessage();
 
-			expect(response).toHaveProperty("result");
 			expect((response as any).result.tools).toEqual([]);
-			expect(mockClient.getTools).toHaveBeenCalledTimes(1); // No additional calls
 		});
 
-		it("should refresh tools if cache is empty and connected", async () => {
-			mockClient.connect.mockResolvedValue(true);
-			(mockClient as any).isConnected = true;
-			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
-			// Start with empty tools initially
-			mockClient.getTools.mockResolvedValue([]);
+		it("should return empty tools when disconnected even if getTools would return data", async () => {
+			const tools = [createMockTool({ name: "cached_tool_1" }), createMockTool({ name: "cached_tool_2" })];
+			mockClientManager = createMockClientManager({ isConnected: false });
+			mockClientManager.getTools.mockReturnValue(tools as any);
 
-			bridge = new McpBridge(mockClient);
-			await bridge.initialize();
+			bridge = new McpBridge(mockClientManager);
 
-			// Clear the initial call
-			mockClient.getTools.mockClear();
-
-			// Now set up mock to return tools on next call
-			const newTools = [createMockTool({ name: "refreshed_tool" })];
-			mockClient.getTools.mockResolvedValue(newTools);
-
-			// Create server and connect transport
 			const server = bridge.createServer();
 			const transport = new MockTransport();
 			await server.connect(transport);
 
-			// Send tools/list request - should trigger refresh since cache is empty
-			const listToolsRequest = {
-				jsonrpc: "2.0" as const,
-				id: 1,
-				method: "tools/list",
-				params: {},
-			};
-
-			transport.simulateIncomingMessage(listToolsRequest);
+			transport.simulateIncomingMessage({ jsonrpc: "2.0" as const, id: 1, method: "tools/list", params: {} });
 			const response = await transport.waitForOutgoingMessage();
 
-			expect(response).toHaveProperty("result");
-			// Should have refreshed and returned the new tools
-			expect((response as any).result.tools).toHaveLength(1);
-			expect((response as any).result.tools[0].name).toBe("refreshed_tool");
-			expect(mockClient.getTools).toHaveBeenCalledTimes(1); // Should have called refresh
+			expect((response as any).result.tools).toEqual([]);
+			// getTools should NOT be called when disconnected
+			expect(mockClientManager.getTools).not.toHaveBeenCalled();
 		});
 
-		it("should not refresh tools if cache is populated", async () => {
-			const cachedTools = [createMockTool({ name: "cached_tool" })];
-			mockClient.connect.mockResolvedValue(true);
-			(mockClient as any).isConnected = true;
-			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
-			mockClient.getTools.mockResolvedValue(cachedTools);
+		it("should call clientManager.getTools() on each request when connected", async () => {
+			const tools = [createMockTool({ name: "tool1" })];
+			mockClientManager.getTools.mockReturnValue(tools as any);
 
-			bridge = new McpBridge(mockClient);
-			await bridge.initialize();
+			bridge = new McpBridge(mockClientManager);
 
-			// Clear the initial call
-			mockClient.getTools.mockClear();
-
-			// Create server and connect transport
 			const server = bridge.createServer();
 			const transport = new MockTransport();
 			await server.connect(transport);
 
-			// Send tools/list request - should NOT trigger refresh since cache is populated
-			const listToolsRequest = {
-				jsonrpc: "2.0" as const,
-				id: 1,
-				method: "tools/list",
-				params: {},
-			};
+			transport.simulateIncomingMessage({ jsonrpc: "2.0" as const, id: 1, method: "tools/list", params: {} });
+			await transport.waitForOutgoingMessage();
 
-			transport.simulateIncomingMessage(listToolsRequest);
-			const response = await transport.waitForOutgoingMessage();
-
-			expect(response).toHaveProperty("result");
-			expect((response as any).result.tools).toHaveLength(1);
-			expect((response as any).result.tools[0].name).toBe("cached_tool");
-			expect(mockClient.getTools).not.toHaveBeenCalled(); // Should NOT have refreshed
+			expect(mockClientManager.getTools).toHaveBeenCalled();
 		});
 	});
 
 	describe("tools/call endpoint", () => {
 		beforeEach(async () => {
-			mockClient.connect.mockResolvedValue(true);
-			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
-			mockClient.getTools.mockResolvedValue([createMockTool()]);
-
-			bridge = new McpBridge(mockClient);
-			await bridge.initialize();
+			bridge = new McpBridge(mockClientManager);
 		});
 
 		it("should call tool successfully", async () => {
-			const toolName = "test_tool";
-			const args = { param1: "value1" };
-			const result = { success: true, data: "result" };
-
-			mockClient.callTool.mockResolvedValue(createMockCallToolResponse(result));
-
-			// Would need to actually invoke the handler to test this
-			// For now, verify the mock is set up correctly
-			const response = await mockClient.callTool(toolName, args);
-			expect(response.result).toEqual(result);
-		});
-
-		it("should handle tool execution errors", async () => {
-			const toolName = "failing_tool";
-			const args = {};
-
-			mockClient.callTool.mockResolvedValue(createMockErrorResponse("Tool execution failed"));
-
-			const response = await mockClient.callTool(toolName, args);
-			expect(response.error).toBeDefined();
-			expect(response.error?.message).toBe("Tool execution failed");
-		});
-
-		it("should return error when Stream Deck is disconnected", async () => {
-			(mockClient as any).isConnected = false;
-
-			// The handler should return an error response
-			// This would require actually calling the handler
-		});
-
-		it("should handle tool not found error", async () => {
-			mockClient.callTool.mockResolvedValue(createMockErrorResponse("Tool not found", "Tool not found"));
-
-			const response = await mockClient.callTool("nonexistent_tool", {});
-			expect(response.error?.message).toBe("Tool not found");
-		});
-
-		it("should call tools/call handler and return success result via MockTransport", async () => {
-			(mockClient as any).isConnected = true;
-			const toolResult = { success: true, data: "success result" };
-			mockClient.callTool.mockResolvedValue(createMockCallToolResponse(toolResult));
+			const toolResult = { success: true, data: "result" };
+			mockClientManager.callTool.mockResolvedValue(createMockCallToolResponse(toolResult) as any);
 
 			const server = bridge.createServer();
 			const transport = new MockTransport();
 			await server.connect(transport);
 
-			const callToolRequest = {
+			transport.simulateIncomingMessage({
 				jsonrpc: "2.0" as const,
 				id: 1,
 				method: "tools/call",
-				params: { name: "test_tool", arguments: { param1: "value1" } },
-			};
+				params: { name: "streamdeck__test_tool", arguments: { param1: "value1" } },
+			});
 
-			transport.simulateIncomingMessage(callToolRequest);
 			const response = await transport.waitForOutgoingMessage();
+			expect(response).toHaveProperty("result");
+			expect((response as any).result.content[0].text).toContain("result");
+		});
 
+		it("should handle tool execution errors", async () => {
+			mockClientManager.callTool.mockResolvedValue(createMockErrorResponse("Tool execution failed") as any);
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: { name: "streamdeck__failing_tool", arguments: {} },
+			});
+
+			const response = await transport.waitForOutgoingMessage();
+			expect((response as any).result.isError).toBe(true);
+		});
+
+		it("should return error when apps are disconnected", async () => {
+			(mockClientManager as any).isConnected = false;
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: { name: "streamdeck__test_tool", arguments: {} },
+			});
+
+			const response = await transport.waitForOutgoingMessage();
+			expect((response as any).result.isError).toBe(true);
+			expect((response as any).result.content[0].text).toContain("No apps connected");
+		});
+
+		it("should call tools/call handler and return success result via MockTransport", async () => {
+			const toolResult = { success: true, data: "success result" };
+			mockClientManager.callTool.mockResolvedValue(createMockCallToolResponse(toolResult) as any);
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: { name: "streamdeck__test_tool", arguments: { param1: "value1" } },
+			});
+
+			const response = await transport.waitForOutgoingMessage();
 			expect(response).toHaveProperty("result");
 			expect((response as any).result.content[0].text).toContain("success result");
 		});
 
 		it("should return error when calling tool while disconnected via MockTransport", async () => {
-			(mockClient as any).isConnected = false;
+			(mockClientManager as any).isConnected = false;
 
 			const server = bridge.createServer();
 			const transport = new MockTransport();
 			await server.connect(transport);
 
-			const callToolRequest = {
+			transport.simulateIncomingMessage({
 				jsonrpc: "2.0" as const,
 				id: 1,
 				method: "tools/call",
-				params: { name: "test_tool", arguments: {} },
-			};
+				params: { name: "streamdeck__test_tool", arguments: {} },
+			});
 
-			transport.simulateIncomingMessage(callToolRequest);
 			const response = await transport.waitForOutgoingMessage();
-
-			expect(response).toHaveProperty("result");
 			expect((response as any).result.isError).toBe(true);
-			expect((response as any).result.content[0].text).toContain("not connected");
+			expect((response as any).result.content[0].text).toContain("No apps connected");
 		});
 
 		it("should handle tool returning error response via MockTransport", async () => {
-			(mockClient as any).isConnected = true;
-			mockClient.callTool.mockResolvedValue(createMockErrorResponse("Tool execution failed"));
+			mockClientManager.callTool.mockResolvedValue(createMockErrorResponse("Tool execution failed") as any);
 
 			const server = bridge.createServer();
 			const transport = new MockTransport();
 			await server.connect(transport);
 
-			const callToolRequest = {
+			transport.simulateIncomingMessage({
 				jsonrpc: "2.0" as const,
 				id: 1,
 				method: "tools/call",
-				params: { name: "test_tool", arguments: {} },
-			};
+				params: { name: "streamdeck__test_tool", arguments: {} },
+			});
 
-			transport.simulateIncomingMessage(callToolRequest);
 			const response = await transport.waitForOutgoingMessage();
-
-			expect(response).toHaveProperty("result");
 			expect((response as any).result.isError).toBe(true);
 		});
 
 		it("should handle tool result with error property via MockTransport", async () => {
-			(mockClient as any).isConnected = true;
-			// Return a response where result.error is set (different from response.error)
-			mockClient.callTool.mockResolvedValue(
-				createMockCallToolResponse({ success: false, error: "Tool-level error message" })
-			);
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			mockClientManager.callTool.mockResolvedValue({
+				id: "1",
+				result: { success: false, error: "Tool-level error message" },
+			} as any);
 
 			const server = bridge.createServer();
 			const transport = new MockTransport();
 			await server.connect(transport);
 
-			const callToolRequest = {
+			transport.simulateIncomingMessage({
 				jsonrpc: "2.0" as const,
 				id: 1,
 				method: "tools/call",
-				params: { name: "test_tool", arguments: {} },
-			};
+				params: { name: "streamdeck__test_tool", arguments: {} },
+			});
 
-			transport.simulateIncomingMessage(callToolRequest);
 			const response = await transport.waitForOutgoingMessage();
-
-			expect(response).toHaveProperty("result");
 			expect((response as any).result.isError).toBe(true);
 			expect((response as any).result.content[0].text).toBe("Tool-level error message");
 		});
 
 		it("should handle tool call exception via MockTransport", async () => {
-			(mockClient as any).isConnected = true;
-			mockClient.callTool.mockRejectedValue(new Error("Network failure"));
+			mockClientManager.callTool.mockRejectedValue(new Error("Network failure"));
 
 			const server = bridge.createServer();
 			const transport = new MockTransport();
 			await server.connect(transport);
 
-			const callToolRequest = {
+			transport.simulateIncomingMessage({
 				jsonrpc: "2.0" as const,
 				id: 1,
 				method: "tools/call",
-				params: { name: "test_tool", arguments: {} },
-			};
+				params: { name: "streamdeck__test_tool", arguments: {} },
+			});
 
-			transport.simulateIncomingMessage(callToolRequest);
 			const response = await transport.waitForOutgoingMessage();
-
-			expect(response).toHaveProperty("result");
 			expect((response as any).result.isError).toBe(true);
 			expect((response as any).result.content[0].text).toContain("Network failure");
 		});
@@ -377,167 +258,117 @@ describe("MCP Protocol Integration Tests", () => {
 
 	describe("resources/list endpoint", () => {
 		beforeEach(async () => {
-			mockClient.connect.mockResolvedValue(true);
-			(mockClient as any).isConnected = true;
-			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
-			mockClient.getTools.mockResolvedValue([]);
-			mockClient.getResources.mockResolvedValue([]);
-
-			bridge = new McpBridge(mockClient);
-			await bridge.initialize();
+			bridge = new McpBridge(mockClientManager);
 		});
 
 		it("should return empty resources when disconnected via MockTransport", async () => {
-			(mockClient as any).isConnected = false;
+			(mockClientManager as any).isConnected = false;
 
 			const server = bridge.createServer();
 			const transport = new MockTransport();
 			await server.connect(transport);
 
-			const listResourcesRequest = {
-				jsonrpc: "2.0" as const,
-				id: 1,
-				method: "resources/list",
-				params: {},
-			};
-
-			transport.simulateIncomingMessage(listResourcesRequest);
+			transport.simulateIncomingMessage({ jsonrpc: "2.0" as const, id: 1, method: "resources/list", params: {} });
 			const response = await transport.waitForOutgoingMessage();
 
-			expect(response).toHaveProperty("result");
 			expect((response as any).result.resources).toEqual([]);
 		});
 
-		it("should return cached resources when connected via MockTransport", async () => {
+		it("should return resources from clientManager when connected via MockTransport", async () => {
 			const resources = [
-				createMockResource({ uri: "streamdeck://test/1", name: "resource1" }),
-				createMockResource({ uri: "streamdeck://test/2", name: "resource2" }),
+				createMockResource({ uri: "streamdeck__test://1", name: "resource1" }),
+				createMockResource({ uri: "streamdeck__test://2", name: "resource2" }),
 			];
-			mockClient.getResources.mockResolvedValue(resources);
+			mockClientManager.getResources.mockReturnValue(resources as any);
 
 			const server = bridge.createServer();
 			const transport = new MockTransport();
 			await server.connect(transport);
 
-			const listResourcesRequest = {
-				jsonrpc: "2.0" as const,
-				id: 1,
-				method: "resources/list",
-				params: {},
-			};
-
-			transport.simulateIncomingMessage(listResourcesRequest);
+			transport.simulateIncomingMessage({ jsonrpc: "2.0" as const, id: 1, method: "resources/list", params: {} });
 			const response = await transport.waitForOutgoingMessage();
 
-			expect(response).toHaveProperty("result");
 			expect((response as any).result.resources).toHaveLength(2);
 		});
 
-		it("should refresh resources if cache is empty and connected", async () => {
-			// Clear the getResources mock set in beforeEach
-			mockClient.getResources.mockClear();
-
-			// Now set up mock to return resources on refresh call
-			const newResources = [createMockResource({ uri: "streamdeck://test/refreshed", name: "refreshed_resource" })];
-			mockClient.getResources.mockResolvedValue(newResources);
+		it("should call clientManager.getResources() on each request when connected", async () => {
+			const resources = [createMockResource({ uri: "streamdeck__test://refreshed", name: "resource" })];
+			mockClientManager.getResources.mockReturnValue(resources as any);
 
 			const server = bridge.createServer();
 			const transport = new MockTransport();
 			await server.connect(transport);
 
-			// Send resources/list request - should trigger refresh since cache is empty
-			const listResourcesRequest = {
-				jsonrpc: "2.0" as const,
-				id: 1,
-				method: "resources/list",
-				params: {},
-			};
-
-			transport.simulateIncomingMessage(listResourcesRequest);
+			transport.simulateIncomingMessage({ jsonrpc: "2.0" as const, id: 1, method: "resources/list", params: {} });
 			const response = await transport.waitForOutgoingMessage();
 
-			expect(response).toHaveProperty("result");
-			// Should have refreshed and returned the new resources
 			expect((response as any).result.resources).toHaveLength(1);
-			expect((response as any).result.resources[0].name).toBe("refreshed_resource");
-			expect(mockClient.getResources).toHaveBeenCalledTimes(1); // Should have called refresh
+			expect(mockClientManager.getResources).toHaveBeenCalled();
 		});
 	});
 
 	describe("resources/read endpoint", () => {
 		beforeEach(async () => {
-			mockClient.connect.mockResolvedValue(true);
-			(mockClient as any).isConnected = true;
-			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
-			mockClient.getTools.mockResolvedValue([]);
-
-			bridge = new McpBridge(mockClient);
-			await bridge.initialize();
+			bridge = new McpBridge(mockClientManager);
 		});
 
 		it("should read resource successfully via MockTransport", async () => {
 			const resourceResult = {
-				uri: "streamdeck://test/resource",
+				uri: "streamdeck__test://resource",
 				mimeType: "application/json",
 				content: { key: "value" },
 			};
-			mockClient.readResource.mockResolvedValue(resourceResult);
+			mockClientManager.readResource.mockResolvedValue(resourceResult);
 
 			const server = bridge.createServer();
 			const transport = new MockTransport();
 			await server.connect(transport);
 
-			const readResourceRequest = {
+			transport.simulateIncomingMessage({
 				jsonrpc: "2.0" as const,
 				id: 1,
 				method: "resources/read",
-				params: { uri: "streamdeck://test/resource" },
-			};
-
-			transport.simulateIncomingMessage(readResourceRequest);
+				params: { uri: "streamdeck__test://resource" },
+			});
 			const response = await transport.waitForOutgoingMessage();
 
 			expect(response).toHaveProperty("result");
 			expect((response as any).result.contents).toHaveLength(1);
-			expect((response as any).result.contents[0].uri).toBe("streamdeck://test/resource");
+			expect((response as any).result.contents[0].uri).toBe("streamdeck__test://resource");
 		});
 
 		it("should throw error when reading resource while disconnected via MockTransport", async () => {
-			(mockClient as any).isConnected = false;
+			(mockClientManager as any).isConnected = false;
 
 			const server = bridge.createServer();
 			const transport = new MockTransport();
 			await server.connect(transport);
 
-			const readResourceRequest = {
+			transport.simulateIncomingMessage({
 				jsonrpc: "2.0" as const,
 				id: 1,
 				method: "resources/read",
-				params: { uri: "streamdeck://test/resource" },
-			};
-
-			transport.simulateIncomingMessage(readResourceRequest);
+				params: { uri: "streamdeck__test://resource" },
+			});
 			const response = await transport.waitForOutgoingMessage();
 
 			expect(response).toHaveProperty("error");
-			expect((response as any).error.message).toContain("not connected");
+			expect((response as any).error.message).toContain("No apps connected");
 		});
 
 		it("should handle read resource exception via MockTransport", async () => {
-			mockClient.readResource.mockRejectedValue(new Error("Resource read failed"));
+			mockClientManager.readResource.mockRejectedValue(new Error("Resource read failed"));
 
 			const server = bridge.createServer();
 			const transport = new MockTransport();
 			await server.connect(transport);
 
-			const readResourceRequest = {
+			transport.simulateIncomingMessage({
 				jsonrpc: "2.0" as const,
 				id: 1,
 				method: "resources/read",
-				params: { uri: "streamdeck://test/resource" },
-			};
-
-			transport.simulateIncomingMessage(readResourceRequest);
+				params: { uri: "streamdeck__test://resource" },
+			});
 			const response = await transport.waitForOutgoingMessage();
 
 			expect(response).toHaveProperty("error");
@@ -547,13 +378,7 @@ describe("MCP Protocol Integration Tests", () => {
 
 	describe("resources/subscribe endpoint", () => {
 		beforeEach(async () => {
-			mockClient.connect.mockResolvedValue(true);
-			(mockClient as any).isConnected = true;
-			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
-			mockClient.getTools.mockResolvedValue([]);
-
-			bridge = new McpBridge(mockClient);
-			await bridge.initialize();
+			bridge = new McpBridge(mockClientManager);
 		});
 
 		it("should subscribe to resource successfully via MockTransport", async () => {
@@ -561,14 +386,12 @@ describe("MCP Protocol Integration Tests", () => {
 			const transport = new MockTransport();
 			await server.connect(transport);
 
-			const subscribeRequest = {
+			transport.simulateIncomingMessage({
 				jsonrpc: "2.0" as const,
 				id: 1,
 				method: "resources/subscribe",
-				params: { uri: "streamdeck://test/resource" },
-			};
-
-			transport.simulateIncomingMessage(subscribeRequest);
+				params: { uri: "streamdeck__test://resource" },
+			});
 			const response = await transport.waitForOutgoingMessage();
 
 			expect(response).toHaveProperty("result");
@@ -576,36 +399,28 @@ describe("MCP Protocol Integration Tests", () => {
 		});
 
 		it("should throw error when subscribing while disconnected via MockTransport", async () => {
-			(mockClient as any).isConnected = false;
+			(mockClientManager as any).isConnected = false;
 
 			const server = bridge.createServer();
 			const transport = new MockTransport();
 			await server.connect(transport);
 
-			const subscribeRequest = {
+			transport.simulateIncomingMessage({
 				jsonrpc: "2.0" as const,
 				id: 1,
 				method: "resources/subscribe",
-				params: { uri: "streamdeck://test/resource" },
-			};
-
-			transport.simulateIncomingMessage(subscribeRequest);
+				params: { uri: "streamdeck__test://resource" },
+			});
 			const response = await transport.waitForOutgoingMessage();
 
 			expect(response).toHaveProperty("error");
-			expect((response as any).error.message).toContain("not connected");
+			expect((response as any).error.message).toContain("No apps connected");
 		});
 	});
 
 	describe("resources/unsubscribe endpoint", () => {
 		beforeEach(async () => {
-			mockClient.connect.mockResolvedValue(true);
-			(mockClient as any).isConnected = true;
-			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
-			mockClient.getTools.mockResolvedValue([]);
-
-			bridge = new McpBridge(mockClient);
-			await bridge.initialize();
+			bridge = new McpBridge(mockClientManager);
 		});
 
 		it("should unsubscribe from resource successfully via MockTransport", async () => {
@@ -614,24 +429,21 @@ describe("MCP Protocol Integration Tests", () => {
 			await server.connect(transport);
 
 			// First subscribe
-			const subscribeRequest = {
+			transport.simulateIncomingMessage({
 				jsonrpc: "2.0" as const,
 				id: 1,
 				method: "resources/subscribe",
-				params: { uri: "streamdeck://test/resource" },
-			};
-			transport.simulateIncomingMessage(subscribeRequest);
+				params: { uri: "streamdeck__test://resource" },
+			});
 			await transport.waitForOutgoingMessage();
 
 			// Then unsubscribe
-			const unsubscribeRequest = {
+			transport.simulateIncomingMessage({
 				jsonrpc: "2.0" as const,
 				id: 2,
 				method: "resources/unsubscribe",
-				params: { uri: "streamdeck://test/resource" },
-			};
-
-			transport.simulateIncomingMessage(unsubscribeRequest);
+				params: { uri: "streamdeck__test://resource" },
+			});
 			const response = await transport.waitForOutgoingMessage();
 
 			expect(response).toHaveProperty("result");
@@ -639,79 +451,58 @@ describe("MCP Protocol Integration Tests", () => {
 		});
 
 		it("should throw error when unsubscribing while disconnected via MockTransport", async () => {
-			(mockClient as any).isConnected = false;
+			(mockClientManager as any).isConnected = false;
 
 			const server = bridge.createServer();
 			const transport = new MockTransport();
 			await server.connect(transport);
 
-			const unsubscribeRequest = {
+			transport.simulateIncomingMessage({
 				jsonrpc: "2.0" as const,
 				id: 1,
 				method: "resources/unsubscribe",
-				params: { uri: "streamdeck://test/resource" },
-			};
-
-			transport.simulateIncomingMessage(unsubscribeRequest);
+				params: { uri: "streamdeck__test://resource" },
+			});
 			const response = await transport.waitForOutgoingMessage();
 
 			expect(response).toHaveProperty("error");
-			expect((response as any).error.message).toContain("not connected");
+			expect((response as any).error.message).toContain("No apps connected");
 		});
 	});
 
 	describe("notifications", () => {
-		it("should send tool list changed notification on reconnection", async () => {
-			mockClient.connect.mockResolvedValue(false);
-
-			bridge = new McpBridge(mockClient);
-			const notificationCallback = jest.fn() as any;
+		it("should send tool list changed notification when clientManager fires onToolsChanged", async () => {
+			bridge = new McpBridge(mockClientManager);
+			const notificationCallback = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
 			bridge.onToolsChanged(notificationCallback);
 
-			await bridge.initialize();
-
-			// Simulate reconnection
-			const onConnectedCallback = mockClient.onConnected.mock.calls[0]?.[0];
-			(mockClient as any).isConnected = true;
-			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
-			mockClient.getTools.mockResolvedValue([createMockTool()]);
-
-			if (onConnectedCallback) {
-				await onConnectedCallback();
+			// Simulate clientManager firing onToolsChanged
+			const managerCallback = mockClientManager.onToolsChanged.mock.calls[0]?.[0];
+			if (managerCallback) {
+				await managerCallback();
 			}
 
 			await wait(10);
-
 			expect(notificationCallback).toHaveBeenCalled();
 		});
 
 		it("should handle multiple notification callbacks", async () => {
-			mockClient.connect.mockResolvedValue(true);
-			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
-			mockClient.getTools.mockResolvedValue([]);
+			bridge = new McpBridge(mockClientManager);
 
-			bridge = new McpBridge(mockClient);
-
-			const callback1 = jest.fn() as any;
-			const callback2 = jest.fn() as any;
-			const callback3 = jest.fn() as any;
+			const callback1 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const callback2 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const callback3 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
 
 			bridge.onToolsChanged(callback1);
 			bridge.onToolsChanged(callback2);
 			bridge.onToolsChanged(callback3);
 
-			await bridge.initialize();
-
-			// Simulate reconnection
-			const onConnectedCallback = mockClient.onConnected.mock.calls[0]?.[0];
-			(mockClient as any).isConnected = true;
-
-			if (onConnectedCallback) {
-				await onConnectedCallback();
+			const managerCallback = mockClientManager.onToolsChanged.mock.calls[0]?.[0];
+			if (managerCallback) {
+				await managerCallback();
 			}
 
 			await wait(10);
-
 			expect(callback1).toHaveBeenCalled();
 			expect(callback2).toHaveBeenCalled();
 			expect(callback3).toHaveBeenCalled();
@@ -720,100 +511,74 @@ describe("MCP Protocol Integration Tests", () => {
 
 	describe("error handling", () => {
 		beforeEach(async () => {
-			mockClient.connect.mockResolvedValue(true);
-			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
-			mockClient.getTools.mockResolvedValue([]);
-
-			bridge = new McpBridge(mockClient);
-			await bridge.initialize();
+			bridge = new McpBridge(mockClientManager);
 		});
 
 		it("should handle network errors gracefully", async () => {
-			mockClient.callTool.mockRejectedValue(new Error("Network error"));
+			mockClientManager.callTool.mockRejectedValue(new Error("Network error"));
 
-			await expect(mockClient.callTool("test_tool", {})).rejects.toThrow("Network error");
-		});
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
 
-		it("should handle malformed responses", async () => {
-			mockClient.getTools.mockRejectedValue(new Error("Invalid JSON"));
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: { name: "streamdeck__test_tool", arguments: {} },
+			});
+			const response = await transport.waitForOutgoingMessage();
 
-			await expect(mockClient.getTools()).rejects.toThrow("Invalid JSON");
+			expect((response as any).result.isError).toBe(true);
+			expect((response as any).result.content[0].text).toContain("Network error");
 		});
 
 		it("should handle timeout errors", async () => {
-			mockClient.callTool.mockRejectedValue(new Error("Request timeout"));
+			mockClientManager.callTool.mockRejectedValue(new Error("Request timeout"));
 
-			await expect(mockClient.callTool("slow_tool", {})).rejects.toThrow("Request timeout");
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: { name: "streamdeck__slow_tool", arguments: {} },
+			});
+			const response = await transport.waitForOutgoingMessage();
+
+			expect((response as any).result.isError).toBe(true);
+			expect((response as any).result.content[0].text).toContain("Request timeout");
 		});
 	});
 
-	describe("reconnection scenarios", () => {
-		it("should handle successful reconnection", async () => {
-			(mockClient as any).isConnected = false;
-			mockClient.connect.mockResolvedValue(false);
+	describe("connection state changes", () => {
+		it("should handle transition from connected to disconnected", async () => {
+			bridge = new McpBridge(mockClientManager);
 
-			bridge = new McpBridge(mockClient);
-			await bridge.initialize();
+			expect(bridge.isConnected).toBe(true);
 
-			expect(bridge.isConnected).toBe(false);
-
-			// Simulate reconnection
-			const onConnectedCallback = mockClient.onConnected.mock.calls[0]?.[0];
-			(mockClient as any).isConnected = true;
-			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
-			mockClient.getTools.mockResolvedValue([createMockTool()]);
-
-			if (onConnectedCallback) {
-				await onConnectedCallback();
-			}
-
-			expect(mockClient.getServerInfo).toHaveBeenCalled();
-			expect(mockClient.getTools).toHaveBeenCalled();
-		});
-
-		it("should handle failed reconnection attempts", async () => {
-			mockClient.connect.mockResolvedValue(false);
-
-			bridge = new McpBridge(mockClient);
-			await bridge.initialize();
-
-			// Simulate failed reconnection
-			const onConnectedCallback = mockClient.onConnected.mock.calls[0]?.[0];
-			(mockClient as any).isConnected = false;
-			mockClient.getServerInfo.mockRejectedValue(new Error("Connection failed"));
-
-			if (onConnectedCallback) {
-				await onConnectedCallback();
-			}
-
-			// Should handle error gracefully
+			(mockClientManager as any).isConnected = false;
 			expect(bridge.isConnected).toBe(false);
 		});
 
-		it("should update tools after reconnection", async () => {
-			const initialTools = [createMockTool({ name: "tool1" })];
+		it("should update tool list when clientManager fires onToolsChanged", async () => {
+			bridge = new McpBridge(mockClientManager);
+			const callback = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			bridge.onToolsChanged(callback);
+
 			const updatedTools = [createMockTool({ name: "tool1" }), createMockTool({ name: "tool2" })];
+			mockClientManager.getTools.mockReturnValue(updatedTools as any);
 
-			mockClient.connect.mockResolvedValue(true);
-			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
-			mockClient.getTools.mockResolvedValue(initialTools);
-
-			bridge = new McpBridge(mockClient);
-			await bridge.initialize();
-
-			expect(mockClient.getTools).toHaveBeenCalledTimes(1);
-
-			// Simulate reconnection with updated tools
-			const onConnectedCallback = mockClient.onConnected.mock.calls[0]?.[0];
-			(mockClient as any).isConnected = true;
-			mockClient.getTools.mockResolvedValue(updatedTools);
-
-			if (onConnectedCallback) {
-				await onConnectedCallback();
+			// Simulate clientManager notifying tools changed
+			const managerCallback = mockClientManager.onToolsChanged.mock.calls[0]?.[0];
+			if (managerCallback) {
+				await managerCallback();
 			}
 
-			expect(mockClient.getTools).toHaveBeenCalledTimes(2);
+			await wait(10);
+			expect(callback).toHaveBeenCalled();
 		});
 	});
 });
-

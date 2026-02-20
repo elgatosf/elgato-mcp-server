@@ -4,21 +4,21 @@ This directory contains comprehensive test coverage for the Stream Deck MCP Brid
 
 ## Current Status
 
-| Metric | Status |
-|--------|--------|
-| Build | ✅ Passing |
-| Test Suites | 10 of 10 passing (100%) |
-| Tests | 238 of 238 passing (100%) |
-| Skipped | 0 tests |
+| Metric      | Status                    |
+| ----------- | ------------------------- |
+| Build       | ✅ Passing                |
+| Test Suites | 12 of 12 passing (100%)   |
+| Tests       | 280 of 280 passing (100%) |
+| Skipped     | 0 tests                   |
 
 ### Coverage Metrics
 
-| Metric | Coverage | Threshold |
-|--------|----------|-----------|
-| Statements | 82.84% | 80% ✅ |
-| Branches | 80.20% | 80% ✅ |
-| Functions | 85.12% | 80% ✅ |
-| Lines | 83.11% | 80% ✅ |
+| Metric     | Coverage | Threshold |
+| ---------- | -------- | --------- |
+| Statements | 88.00%   | 80% ✅    |
+| Branches   | 80.65%   | 80% ✅    |
+| Functions  | 90.78%   | 80% ✅    |
+| Lines      | 88.50%   | 80% ✅    |
 
 ## Test Structure
 
@@ -30,11 +30,12 @@ src/__tests__/
 │   ├── MockServer.ts                     # Mock implementation of net.Server
 │   ├── MockTransport.ts                  # Mock implementation of MCP Transport
 │   └── testUtils.ts                      # Helper functions for creating test data
-├── unit/                                 # Unit tests (6 test files, 185 tests)
+├── unit/                                 # Unit tests (8 test files, 227 tests)
 │   ├── constants.test.ts                 # Socket path generation tests (14 tests)
 │   ├── utils.test.ts                     # Utility functions tests (53 tests)
-│   ├── StreamDeckClient.test.ts          # IPC client tests (65 tests, includes elicitation)
-│   ├── McpBridge.test.ts                 # MCP bridge logic tests (41 tests, includes elicitation)
+│   ├── IpcClient.test.ts                 # IPC client tests (65 tests, includes elicitation)
+│   ├── ClientManager.test.ts             # Client manager aggregation tests (33 tests)
+│   ├── McpBridge.test.ts                 # MCP bridge logic tests (72 tests, includes elicitation)
 │   ├── http-server-startup.test.ts       # HTTP server initialization tests (4 tests)
 │   └── http-session-timeout.test.ts      # HTTP session timeout tests (6 tests)
 └── integration/                          # Integration tests (4 test files, 53 tests)
@@ -60,6 +61,7 @@ pnpm test:ci           # Run tests in CI/CD mode
 ### Unit Tests
 
 #### constants.test.ts (14 tests)
+
 - Cross-platform socket path generation (Windows, macOS, Linux)
 - Timeout constants validation
 - Buffer size validation
@@ -68,6 +70,7 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Log prefix validation
 
 #### utils.test.ts (53 tests)
+
 - Tool conversion with various input formats
 - Schema transformation correctness
 - Annotations and icons preservation
@@ -77,7 +80,8 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Logging functionality
 - Resource conversion (`convertToMcpResources`)
 
-#### StreamDeckClient.test.ts (65 tests)
+#### IpcClient.test.ts (65 tests)
+
 - Connection lifecycle (connect, disconnect, timeout, errors)
 - Message parsing and buffer processing
 - Partial message handling
@@ -92,10 +96,18 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Resources API (getResources, readResource)
 - Elicitation handling (type guard, callback registration, response handling, timeout, error handling)
 
-#### McpBridge.test.ts (41 tests)
+#### ClientManager.test.ts (33 tests)
+
+- Multi-client aggregation of tools and resources
+- `appname__` prefix application and stripping
+- Routing of tool calls to the correct IpcClient
+- Forwarding of onToolsChanged / onResourcesChanged / onNotification / onElicitation callbacks
+- Handling connected/disconnected client states
+
+#### McpBridge.test.ts (72 tests)
+
 - Initialization (connected and disconnected modes)
 - Server creation with custom info
-- Tool caching and refresh
 - Callback notifications
 - Error handling in callbacks
 - Connection state management
@@ -106,12 +118,14 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Elicitation forwarding (callback registration, decline when no active server)
 
 #### http-server-startup.test.ts (4 tests)
+
 - EADDRINUSE error handling
 - EACCES error handling
 - EADDRNOTAVAIL error handling
 - Generic error handling
 
 #### http-session-timeout.test.ts (6 tests)
+
 - Session timeout after idle period
 - Multiple session cleanup
 - Custom timeout configuration
@@ -120,6 +134,7 @@ pnpm test:ci           # Run tests in CI/CD mode
 ### Integration Tests
 
 #### transports.test.ts
+
 - stdio transport initialization
 - HTTP transport with multiple sessions
 - Session notification on tools change
@@ -131,6 +146,7 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Callback notifications on reconnection
 
 #### mcp-protocol.test.ts (49 tests)
+
 - tools/list endpoint (cached tools, empty tools, refresh)
 - tools/call endpoint (success, errors, disconnected state)
 - Tool not found error
@@ -141,12 +157,14 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Resources via MockTransport (list, read, subscribe, unsubscribe endpoints)
 
 #### http-cors.test.ts
+
 - CORS preflight requests (OPTIONS)
 - CORS headers validation
 - Cross-origin request handling
 - Multiple origin support
 
 #### http-session-lifecycle.test.ts
+
 - Session creation and initialization
 - Session cleanup on disconnect
 - Multiple concurrent sessions
@@ -156,16 +174,20 @@ pnpm test:ci           # Run tests in CI/CD mode
 ## Test Utilities
 
 ### MockMcpBridge
+
 Mock implementation of `McpBridge` for testing HTTP transport and MCP server functionality:
+
 - Centralized mock to prevent synchronization issues with the real `McpBridge` class
-- Includes all public methods: `initialize`, `close`, `createServer`, `onToolsChanged`, `onResourcesChanged`, `onStreamDeckNotification`
+- Includes all public methods: `initialize`, `close`, `createServer`, `onToolsChanged`, `onResourcesChanged`, `onClientNotification`
 - `isConnected` getter/setter for controlling connection state
 - `createMockMcpBridge(overrides)` - Factory function for easy customization
 
 **Important**: This mock must be kept in sync with the real `McpBridge` class interface. When adding new public methods to `McpBridge`, update this mock accordingly.
 
 ### MockSocket
+
 Mock implementation of `net.Socket` for testing IPC communication:
+
 - `simulateData(data)` - Simulate receiving data
 - `simulateConnect()` - Simulate connection event
 - `simulateError(error)` - Simulate error event
@@ -173,13 +195,17 @@ Mock implementation of `net.Socket` for testing IPC communication:
 - `getLastWritten()` - Get last written data
 
 ### MockServer
+
 Mock implementation of `net.Server` for testing signal listener:
+
 - `simulateConnection(socket)` - Simulate new connection
 - `isListening()` - Check if server is listening
 - `getConnections()` - Get active connections
 
 ### MockTransport
+
 Mock implementation of MCP Transport for testing MCP protocol communication:
+
 - `start()` / `close()` - Transport lifecycle
 - `send(message)` - Send JSON-RPC message
 - `simulateIncomingMessage(message)` - Simulate receiving a message
@@ -188,10 +214,12 @@ Mock implementation of MCP Transport for testing MCP protocol communication:
 - `waitForOutgoingMessage(timeout)` - Wait for next outgoing message
 
 ### Test Data Helpers (testUtils.ts)
+
 - `createMockTool(overrides)` - Create mock tool definition
 - `createMockResource(overrides)` - Create mock MCP resource
 - `createMockServerInfo(overrides)` - Create mock server info
-- `createMockClient(overrides)` - Create mock client with getResources/readResource/onElicitation methods
+- `createMockClientManager(overrides)` - Create mock `ClientManager` for use in McpBridge and transport tests
+- `createMockClient(overrides)` - Create mock IpcClient with getResources/readResource/onElicitation methods
 - `createMockToolsListResponse(tools)` - Create mock tools list response
 - `createMockCallToolResponse(result, error)` - Create mock call tool response
 - `createMockErrorResponse(message, data)` - Create mock error response
@@ -201,17 +229,18 @@ Mock implementation of MCP Transport for testing MCP protocol communication:
 
 ## Test Configuration
 
-| Setting | Value |
-|---------|-------|
-| Test Framework | Jest 30.2.0 with ts-jest |
-| Module System | ESM (via `--experimental-vm-modules`) |
-| Test Environment | Node.js |
-| Test Timeout | 10 seconds |
-| Coverage Formats | text, lcov, html |
+| Setting          | Value                                 |
+| ---------------- | ------------------------------------- |
+| Test Framework   | Jest 30.2.0 with ts-jest              |
+| Module System    | ESM (via `--experimental-vm-modules`) |
+| Test Environment | Node.js                               |
+| Test Timeout     | 10 seconds                            |
+| Coverage Formats | text, lcov, html                      |
 
 ### Coverage Thresholds
 
 The project maintains 80% coverage thresholds for all metrics:
+
 - Statements: 80%
 - Branches: 80%
 - Functions: 80%
@@ -227,11 +256,11 @@ The project maintains 80% coverage thresholds for all metrics:
 
 ## Implementation Notes
 
-### StreamDeckClient Dependency Injection
+### IpcClient Dependency Injection
 
-The `StreamDeckClient` class uses dependency injection for testability:
-- Accepts optional `socketFactory` and `serverFactory` parameters
+The `IpcClient` class uses dependency injection for testability:
+
+- Accepts optional `socketFactory` and `serverFactory` parameters in its `IpcClientConfig`
 - Defaults to actual `net.Socket` and `net.createServer` for production
 - Enables full unit test coverage without complex ESM module mocking
 - Maintains 100% backward compatibility with existing code
-
