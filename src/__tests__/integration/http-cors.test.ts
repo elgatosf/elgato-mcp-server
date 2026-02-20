@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "@jest/globals";
 import type { Server } from "node:http";
 
 import { McpBridge } from "../../McpBridge.js";
-import type { StreamDeckClient } from "../../StreamDeckClient.js";
+import type { IpcClient } from "../../IpcClient.js";
 import { createHttpTransportApp, type SessionData } from "../../transports/http.js";
 import { createMockClient, createMockServerInfo, createMockTool } from "../helpers/testUtils.js";
 
@@ -10,7 +10,7 @@ describe("HTTP CORS Configuration Tests", () => {
 	let server: Server;
 	let baseUrl: string;
 	let sessions: Map<string, SessionData>;
-	let mockClient: jest.Mocked<StreamDeckClient>;
+	let mockClient: jest.Mocked<IpcClient>;
 	let bridge: McpBridge;
 	let allowedOrigins: string[];
 

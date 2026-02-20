@@ -3,13 +3,13 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import { LOG_PREFIX, SDK_NOTIFICATIONS } from "../../constants.js";
 import { createConnectedBridge, createInitializedBridge, McpBridge } from "../../McpBridge.js";
-import type { StreamDeckClient } from "../../StreamDeckClient.js";
+import type { IpcClient } from "../../IpcClient.js";
 import { MockTransport } from "../helpers/MockTransport.js";
 import { createMockResource, createMockServerInfo, createMockTool, wait } from "../helpers/testUtils.js";
 
 describe("McpBridge", () => {
 	let bridge: McpBridge;
-	let mockClient: jest.Mocked<StreamDeckClient>;
+	let mockClient: jest.Mocked<IpcClient>;
 
 	beforeEach(() => {
 		jest.clearAllMocks();
@@ -1294,7 +1294,7 @@ describe("McpBridge", () => {
 	});
 
 	describe("elicitation forwarding", () => {
-		it("should register elicitation callback with StreamDeckClient", async () => {
+		it("should register elicitation callback with IpcClient", async () => {
 			mockClient.connect.mockResolvedValue(true);
 			mockClient.getServerInfo.mockResolvedValue(createMockServerInfo());
 			mockClient.getTools.mockResolvedValue([]);
@@ -1571,7 +1571,7 @@ describe("McpBridge", () => {
 
 describe("createInitializedBridge", () => {
 	it("should create and initialize a bridge", async () => {
-		// Note: This test uses the real StreamDeckClient which will fail to connect
+		// Note: This test uses the real IpcClient which will fail to connect
 		// but should still create and return a bridge in disconnected mode
 		const bridge = await createInitializedBridge();
 

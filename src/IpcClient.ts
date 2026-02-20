@@ -9,8 +9,6 @@ import {
 	QUICK_CONNECT_TIMEOUT_MS,
 	RECONNECT_POLL_INTERVAL_MS,
 	REQUEST_TIMEOUT_MS,
-	SIGNAL_SOCKET_PATH,
-	SOCKET_PATH,
 } from "./constants.js";
 import type {
 	CallToolRequest,
@@ -18,6 +16,7 @@ import type {
 	ElicitationCallback,
 	ElicitationRequest,
 	ElicitationResponse,
+	IpcClientConfig,
 	IpcResponse,
 	McpResource,
 	McpTool,
@@ -47,10 +46,12 @@ export type SocketFactory = (path: string) => net.Socket;
 export type ServerFactory = (connectionListener?: (socket: net.Socket) => void) => net.Server;
 
 /**
- * Client for communicating with Stream Deck via IPC socket.
+ * Generic IPC client for communicating with an app via a Unix socket or Windows named pipe.
+ * Handles connection lifecycle, request/response correlation, reconnection, and notifications.
  */
-export class StreamDeckClient {
+export class IpcClient {
 	private buffer = "";
+	private readonly config: IpcClientConfig;
 	private elicitationCallback: ElicitationCallback | null = null;
 	private notificationCallbacks: NotificationCallback[] = [];
 	private onConnectedCallback: (() => void) | null = null;
@@ -63,27 +64,30 @@ export class StreamDeckClient {
 	private readonly socketFactory: SocketFactory;
 
 	/**
-	 * Creates a new StreamDeckClient instance.
+	 * Creates a new IpcClient instance.
+	 * @param config - Configuration specifying the app name and socket paths.
 	 * @param socketFactory - Optional factory function for creating sockets (for testing).
 	 * @param serverFactory - Optional factory function for creating servers (for testing).
 	 */
 	constructor(
+		config: IpcClientConfig,
 		socketFactory: SocketFactory = (path: string) => net.createConnection(path),
 		serverFactory: ServerFactory = (listener) => net.createServer(listener),
 	) {
-		this.socketFactory = socketFactory;
+		this.config = config;
 		this.serverFactory = serverFactory;
+		this.socketFactory = socketFactory;
 	}
 
 	/**
-	 * Whether the client is currently connected to Stream Deck.
+	 * Whether the client is currently connected to the app.
 	 */
 	public get isConnected(): boolean {
 		return this.socket !== null && !this.socket.destroyed;
 	}
 
 	/**
-	 * Invokes a tool on Stream Deck.
+	 * Invokes a tool on the connected app.
 	 * @param toolName - Name of the tool to invoke.
 	 * @param args - Arguments to pass to the tool.
 	 * @param requestId - Optional request ID to use for correlation. If provided, must be unique.
@@ -104,13 +108,13 @@ export class StreamDeckClient {
 	}
 
 	/**
-	 * Attempts to connect to Stream Deck via IPC socket.
+	 * Attempts to connect to the app via IPC socket.
 	 * @param timeoutMs - Connection timeout in milliseconds.
 	 * @returns Whether connection was successful.
 	 */
 	public async connect(timeoutMs = QUICK_CONNECT_TIMEOUT_MS): Promise<boolean> {
 		return new Promise((resolve) => {
-			const socket = this.socketFactory(SOCKET_PATH);
+			const socket = this.socketFactory(this.config.socketPath);
 
 			const timeoutId = setTimeout(() => {
 				socket.destroy();
@@ -132,7 +136,7 @@ export class StreamDeckClient {
 	}
 
 	/**
-	 * Disconnects from Stream Deck and stops the signal listener.
+	 * Disconnects from the app and stops the signal listener.
 	 */
 	public disconnect(): void {
 		this.socket?.destroy();
@@ -147,7 +151,7 @@ export class StreamDeckClient {
 	}
 
 	/**
-	 * Gets the list of available resources from Stream Deck.
+	 * Gets the list of available resources from the connected app.
 	 * @returns Array of resource definitions.
 	 */
 	public async getResources(): Promise<McpResource[]> {
@@ -162,7 +166,7 @@ export class StreamDeckClient {
 	}
 
 	/**
-	 * Gets server info from Stream Deck.
+	 * Gets server info from the connected app.
 	 * @returns Server info or null if unavailable.
 	 */
 	public async getServerInfo(): Promise<ServerInfo | null> {
@@ -177,7 +181,7 @@ export class StreamDeckClient {
 	}
 
 	/**
-	 * Gets the list of available tools from Stream Deck.
+	 * Gets the list of available tools from the connected app.
 	 * @returns Array of tool definitions.
 	 */
 	public async getTools(): Promise<McpTool[]> {
@@ -192,7 +196,7 @@ export class StreamDeckClient {
 	}
 
 	/**
-	 * Registers a callback to be invoked when Stream Deck connects.
+	 * Registers a callback to be invoked when the app connects.
 	 * @param callback - Callback function.
 	 */
 	public onConnected(callback: () => void): void {
@@ -200,7 +204,7 @@ export class StreamDeckClient {
 	}
 
 	/**
-	 * Registers a callback to be invoked when Stream Deck disconnects.
+	 * Registers a callback to be invoked when the app disconnects.
 	 * @param callback - Callback function.
 	 */
 	public onDisconnected(callback: () => void): void {
@@ -208,7 +212,7 @@ export class StreamDeckClient {
 	}
 
 	/**
-	 * Registers a callback to handle elicitation requests from Stream Deck.
+	 * Registers a callback to handle elicitation requests from the connected app.
 	 * Only one callback can be registered at a time.
 	 * The callback receives elicitation params and must return a response.
 	 * @param callback - Async callback function that handles elicitation requests.
@@ -218,7 +222,7 @@ export class StreamDeckClient {
 	}
 
 	/**
-	 * Registers a callback to be invoked when a notification is received from Stream Deck.
+	 * Registers a callback to be invoked when a notification is received from the app.
 	 * Multiple callbacks can be registered.
 	 * @param callback - Callback function that receives the method name and optional params.
 	 */
@@ -227,7 +231,7 @@ export class StreamDeckClient {
 	}
 
 	/**
-	 * Reads a resource by URI from Stream Deck.
+	 * Reads a resource by URI from the connected app.
 	 * @param uri - The resource URI to read.
 	 * @returns The resource read result containing contents.
 	 */
@@ -240,14 +244,14 @@ export class StreamDeckClient {
 		}
 
 		if (!response.result) {
-			throw new Error("No result returned from Stream Deck");
+			throw new Error(`No result returned from ${this.config.name}`);
 		}
 
 		return response.result;
 	}
 
 	/**
-	 * Starts listening for ready signals from Stream Deck.
+	 * Starts listening for ready signals from the app.
 	 * Attempts to create a signal server for instant notifications.
 	 * Falls back to polling only if the signal server cannot be created.
 	 */
@@ -302,7 +306,7 @@ export class StreamDeckClient {
 		}
 
 		// Start polling for reconnection only if we don't own the signal server
-		// If we own the signal server, we'll get notified when StreamDeck is ready
+		// If we own the signal server, we'll get notified when the app is ready
 		if (!this.signalServer) {
 			this.startPolling();
 		}
@@ -329,9 +333,9 @@ export class StreamDeckClient {
 	}
 
 	/**
-	 * Handles an elicitation request from Stream Deck.
-	 * Invokes the registered callback and sends the response back to Stream Deck.
-	 * @param request - The elicitation request from Stream Deck.
+	 * Handles an elicitation request from the connected app.
+	 * Invokes the registered callback and sends the response back.
+	 * @param request - The elicitation request from the app.
 	 */
 	private async handleElicitationRequest(request: ElicitationRequest): Promise<void> {
 		const { id, params } = request;
@@ -375,7 +379,7 @@ export class StreamDeckClient {
 			}
 		}
 
-		// Send response back to Stream Deck
+		// Send response back to the app
 		this.sendElicitationResponse(id, response);
 	}
 
@@ -386,7 +390,7 @@ export class StreamDeckClient {
 	/**
 	 * Handles a notification by invoking all registered callbacks.
 	 * Each callback is wrapped in try-catch for error isolation.
-	 * @param notification - The notification received from Stream Deck.
+	 * @param notification - The notification received from the app.
 	 */
 	private handleNotification(notification: Notification): void {
 		for (const callback of this.notificationCallbacks) {
@@ -423,7 +427,7 @@ export class StreamDeckClient {
 	/**
 	 * Handles EADDRINUSE error by checking if the socket is stale.
 	 * If stale, removes the socket file and retries binding.
-	 * If active, another process owns it - we don't retry.
+	 * If active, another process owns it — we don't retry.
 	 */
 	private async handleSocketInUse(): Promise<void> {
 		// On Windows, named pipes don't leave stale files
@@ -433,7 +437,7 @@ export class StreamDeckClient {
 		}
 
 		// Check if the socket file exists and has an active listener
-		const isActive = await this.isSocketActive(SIGNAL_SOCKET_PATH);
+		const isActive = await this.isSocketActive(this.config.signalSocketPath);
 		if (isActive) {
 			// Another process is actively listening - don't retry
 			console.error(`${LOG_PREFIX} Signal socket in use by another process`);
@@ -441,7 +445,7 @@ export class StreamDeckClient {
 			// Socket file is stale - remove it and retry
 			console.error(`${LOG_PREFIX} Removing stale signal socket file`);
 			try {
-				fs.unlinkSync(SIGNAL_SOCKET_PATH);
+				fs.unlinkSync(this.config.signalSocketPath);
 			} catch {
 				// File doesn't exist or can't be removed
 			}
@@ -553,7 +557,7 @@ export class StreamDeckClient {
 	}
 
 	/**
-	 * Sends an elicitation response back to Stream Deck.
+	 * Sends an elicitation response back to the connected app.
 	 * Uses the original request's id for correlation.
 	 * @param id - The id from the original elicitation request.
 	 * @param response - The elicitation response to send.
@@ -575,7 +579,7 @@ export class StreamDeckClient {
 
 	private async sendRequest<T extends IpcResponse>(request: object, requestId?: string): Promise<T> {
 		if (!this.socket || this.socket.destroyed) {
-			throw new Error("Not connected to Stream Deck");
+			throw new Error(`Not connected to ${this.config.name}`);
 		}
 
 		// Use provided requestId or generate a new one
@@ -615,7 +619,7 @@ export class StreamDeckClient {
 	}
 
 	/**
-	 * Starts polling to periodically check if Stream Deck is available.
+	 * Starts polling to periodically check if the app is available.
 	 * Used as a fallback for clients that don't own the signal server.
 	 */
 	private startPolling(): void {
@@ -636,7 +640,7 @@ export class StreamDeckClient {
 		if (this.signalServer) return;
 
 		this.signalServer = this.serverFactory((connection) => {
-			console.error(`${LOG_PREFIX} Received ready signal from Stream Deck`);
+			console.error(`${LOG_PREFIX} Received ready signal from ${this.config.name}`);
 			connection.end();
 			void this.handleReadySignal();
 		});
@@ -664,8 +668,8 @@ export class StreamDeckClient {
 			}
 		});
 
-		this.signalServer.listen(SIGNAL_SOCKET_PATH, () => {
-			console.error(`${LOG_PREFIX} Listening for ready signals on ${SIGNAL_SOCKET_PATH}`);
+		this.signalServer.listen(this.config.signalSocketPath, () => {
+			console.error(`${LOG_PREFIX} Listening for ready signals on ${this.config.signalSocketPath}`);
 		});
 	}
 }

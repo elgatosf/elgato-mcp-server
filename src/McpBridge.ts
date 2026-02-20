@@ -15,8 +15,8 @@ import {
 	UnsubscribeRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
-import { DEFAULT_SERVER_INFO, SDK_NOTIFICATIONS } from "./constants.js";
-import { StreamDeckClient } from "./StreamDeckClient.js";
+import { DEFAULT_SERVER_INFO, SDK_NOTIFICATIONS, SIGNAL_SOCKET_PATH, SOCKET_PATH } from "./constants.js";
+import { IpcClient } from "./IpcClient.js";
 import type { ElicitationParams, ElicitationResponse, ServerInfo } from "./types.js";
 import { convertToMcpResources, convertToMcpTools, log } from "./utils.js";
 
@@ -31,7 +31,7 @@ export class McpBridge {
 	private activeToolCalls: Map<string, McpServer> = new Map();
 	private cachedResources: Resource[] = [];
 	private cachedTools: Tool[] = [];
-	private client: StreamDeckClient;
+	private client: IpcClient;
 	private notificationForwardCallbacks: Array<(method: string, params?: unknown) => Promise<void>> = [];
 	private notifyResourcesChangedCallbacks: Array<() => Promise<void>> = [];
 	private notifyToolsChangedCallbacks: Array<() => Promise<void>> = [];
@@ -40,10 +40,16 @@ export class McpBridge {
 
 	/**
 	 * Creates a new MCP Bridge instance.
-	 * @param client - Optional StreamDeckClient instance for testing
+	 * @param client - Optional IpcClient instance for testing.
 	 */
-	public constructor(client?: StreamDeckClient) {
-		this.client = client ?? new StreamDeckClient();
+	public constructor(client?: IpcClient) {
+		this.client =
+			client ??
+			new IpcClient({
+				name: "streamdeck",
+				signalSocketPath: SIGNAL_SOCKET_PATH,
+				socketPath: SOCKET_PATH,
+			});
 		this.setupClientCallbacks();
 	}
 

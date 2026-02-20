@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, jest } from "@jest/globals";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolRequest, ListToolsRequest } from "@modelcontextprotocol/sdk/types.js";
 import { McpBridge } from "../../McpBridge.js";
-import type { StreamDeckClient } from "../../StreamDeckClient.js";
+import type { IpcClient } from "../../IpcClient.js";
 import { MockSocket } from "../helpers/MockSocket.js";
 import { MockTransport } from "../helpers/MockTransport.js";
 import {
@@ -17,7 +17,7 @@ import {
 
 describe("MCP Protocol Integration Tests", () => {
 	let bridge: McpBridge;
-	let mockClient: jest.Mocked<StreamDeckClient>;
+	let mockClient: jest.Mocked<IpcClient>;
 	let mockSocket: MockSocket;
 
 	beforeEach(() => {

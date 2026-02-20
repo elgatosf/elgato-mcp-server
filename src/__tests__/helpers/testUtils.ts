@@ -1,5 +1,6 @@
 import { jest } from "@jest/globals";
-import type { StreamDeckClient } from "../../StreamDeckClient.js";
+
+import type { IpcClient } from "../../IpcClient.js";
 import type { CallToolResponse, McpResource, McpTool, ServerInfo, ToolsListResponse } from "../../types.js";
 
 /**
@@ -90,11 +91,7 @@ export function wait(ms: number): Promise<void> {
 /**
  * Waits for a condition to be true.
  */
-export async function waitFor(
-	condition: () => boolean,
-	timeout = 1000,
-	interval = 10,
-): Promise<void> {
+export async function waitFor(condition: () => boolean, timeout = 1000, interval = 10): Promise<void> {
 	const startTime = Date.now();
 	while (!condition()) {
 		if (Date.now() - startTime > timeout) {
@@ -122,7 +119,7 @@ export function createDeferred<T>(): {
 }
 
 /**
- * Creates a mock StreamDeckClient for testing.
+ * Creates a mock IpcClient for testing.
  * Provides a consistent mock implementation that can be customized via overrides.
  */
 export function createMockClient(
@@ -141,7 +138,7 @@ export function createMockClient(
 		onElicitation: jest.Mock;
 		startSignalListener: jest.Mock;
 	}> = {},
-): jest.Mocked<StreamDeckClient> {
+): jest.Mocked<IpcClient> {
 	return {
 		isConnected: false,
 		connect: jest.fn(),
@@ -157,5 +154,5 @@ export function createMockClient(
 		onElicitation: jest.fn(),
 		startSignalListener: jest.fn(),
 		...overrides,
-	} as unknown as jest.Mocked<StreamDeckClient>;
+	} as unknown as jest.Mocked<IpcClient>;
 }

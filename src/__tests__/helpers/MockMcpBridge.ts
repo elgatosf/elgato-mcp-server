@@ -8,7 +8,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
  * When adding new public methods to McpBridge, ensure they are also added here.
  *
  * Public methods from McpBridge that must be mocked:
- * - constructor(client?: StreamDeckClient)
+ * - constructor(client?: IpcClient)
  * - get isConnected(): boolean
  * - close(): void
  * - createServer(): McpServer

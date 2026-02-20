@@ -1,14 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
 
 import { RECONNECT_POLL_INTERVAL_MS, REQUEST_TIMEOUT_MS } from "../../constants.js";
-import { StreamDeckClient } from "../../StreamDeckClient.js";
-import type { ElicitationCallback } from "../../types.js";
+import { IpcClient } from "../../IpcClient.js";
+import type { ElicitationCallback, IpcClientConfig } from "../../types.js";
 import { MockServer } from "../helpers/MockServer.js";
 import { MockSocket } from "../helpers/MockSocket.js";
 import { createMockResource, createMockServerInfo, createMockTool, wait } from "../helpers/testUtils.js";
 
-describe("StreamDeckClient", () => {
-	let client: StreamDeckClient;
+const testConfig: IpcClientConfig = {
+	name: "test-app",
+	signalSocketPath: "/tmp/test-app-ready.sock",
+	socketPath: "/tmp/test-app.sock",
+};
+
+describe("IpcClient", () => {
+	let client: IpcClient;
 	let mockSocket: MockSocket;
 	let mockServer: MockServer;
 
@@ -17,7 +23,8 @@ describe("StreamDeckClient", () => {
 		mockServer = new MockServer();
 
 		// Create client with mock factories
-		client = new StreamDeckClient(
+		client = new IpcClient(
+			testConfig,
 			() => mockSocket as any, // socketFactory
 			(listener) => {
 				// serverFactory
@@ -378,9 +385,9 @@ describe("StreamDeckClient", () => {
 		it("should throw error when calling methods while disconnected", async () => {
 			client.disconnect();
 
-			await expect(client.getServerInfo()).rejects.toThrow("Not connected to Stream Deck");
-			await expect(client.getTools()).rejects.toThrow("Not connected to Stream Deck");
-			await expect(client.callTool("test", {})).rejects.toThrow("Not connected to Stream Deck");
+			await expect(client.getServerInfo()).rejects.toThrow("Not connected to test-app");
+			await expect(client.getTools()).rejects.toThrow("Not connected to test-app");
+			await expect(client.callTool("test", {})).rejects.toThrow("Not connected to test-app");
 		});
 
 		it("should send correct request for getResources", async () => {
@@ -479,19 +486,19 @@ describe("StreamDeckClient", () => {
 			// Send response without result
 			mockSocket.simulateData(JSON.stringify({ id: req.id }) + "\n");
 
-			await expect(requestPromise).rejects.toThrow("No result returned from Stream Deck");
+			await expect(requestPromise).rejects.toThrow("No result returned from test-app");
 		});
 
 		it("should throw error when calling getResources while disconnected", async () => {
 			client.disconnect();
 
-			await expect(client.getResources()).rejects.toThrow("Not connected to Stream Deck");
+			await expect(client.getResources()).rejects.toThrow("Not connected to test-app");
 		});
 
 		it("should throw error when calling readResource while disconnected", async () => {
 			client.disconnect();
 
-			await expect(client.readResource("streamdeck://test")).rejects.toThrow("Not connected to Stream Deck");
+			await expect(client.readResource("streamdeck://test")).rejects.toThrow("Not connected to test-app");
 		});
 	});
 
@@ -625,7 +632,7 @@ describe("StreamDeckClient", () => {
 			};
 
 			// Create client with tracking socket factory
-			const testClient = new StreamDeckClient(trackingSocketFactory, (listener) => {
+			const testClient = new IpcClient(testConfig, trackingSocketFactory, (listener) => {
 				if (listener) {
 					mockServer.on("connection", listener);
 				}
@@ -666,7 +673,7 @@ describe("StreamDeckClient", () => {
 			};
 
 			// Create client with tracking socket factory
-			const testClient = new StreamDeckClient(trackingSocketFactory, (listener) => {
+			const testClient = new IpcClient(testConfig, trackingSocketFactory, (listener) => {
 				if (listener) {
 					mockServer.on("connection", listener);
 				}
@@ -733,7 +740,7 @@ describe("StreamDeckClient", () => {
 			};
 
 			// Create client with tracking socket factory
-			const testClient = new StreamDeckClient(originalSocketFactory, (listener) => {
+			const testClient = new IpcClient(testConfig, originalSocketFactory, (listener) => {
 				if (listener) {
 					mockServer.on("connection", listener);
 				}
@@ -767,7 +774,7 @@ describe("StreamDeckClient", () => {
 			// Create a custom mock server that simulates EADDRINUSE
 			const errorMockServer = new MockServer();
 
-			const testClient = new StreamDeckClient(
+			const testClient = new IpcClient(testConfig, 
 				() => mockSocket as any,
 				(listener) => {
 					return errorMockServer as any;
@@ -813,7 +820,7 @@ describe("StreamDeckClient", () => {
 			};
 
 			// Create client with tracking server factory
-			const testClient = new StreamDeckClient(() => mockSocket as any, trackingServerFactory);
+			const testClient = new IpcClient(testConfig, () => mockSocket as any, trackingServerFactory);
 
 			// Spy on startPolling to verify it's NOT called
 			const startPollingSpy = jest.spyOn(testClient as any, "startPolling");
@@ -847,7 +854,7 @@ describe("StreamDeckClient", () => {
 			const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
 
 			// Create client
-			const testClient = new StreamDeckClient(
+			const testClient = new IpcClient(testConfig, 
 				() => mockSocket as any,
 				(listener) => {
 					if (listener) {

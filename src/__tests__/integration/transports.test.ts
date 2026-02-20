@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, jest } from "@jest/globals";
 import { McpBridge } from "../../McpBridge.js";
-import type { StreamDeckClient } from "../../StreamDeckClient.js";
+import type { IpcClient } from "../../IpcClient.js";
 import { MockSocket } from "../helpers/MockSocket.js";
 import { createMockClient, createMockResource, createMockServerInfo, createMockTool, wait } from "../helpers/testUtils.js";
 
 describe("Transport Integration Tests", () => {
-	let mockClient: jest.Mocked<StreamDeckClient>;
+	let mockClient: jest.Mocked<IpcClient>;
 	let mockSocket: MockSocket;
 
 	beforeEach(() => {

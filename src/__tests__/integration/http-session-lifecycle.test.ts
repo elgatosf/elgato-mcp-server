@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, jest } from "@je
 import type { Server } from "node:http";
 
 import { McpBridge } from "../../McpBridge.js";
-import type { StreamDeckClient } from "../../StreamDeckClient.js";
+import type { IpcClient } from "../../IpcClient.js";
 import { createHttpTransportApp, type SessionData } from "../../transports/http.js";
 import { createMockClient, createMockServerInfo, createMockTool } from "../helpers/testUtils.js";
 import { MCP_ERROR_CODES } from "../../constants.js";
@@ -18,7 +18,7 @@ describe("HTTP Session Lifecycle Integration Tests", () => {
 	let server: Server;
 	let baseUrl: string;
 	let sessions: Map<string, SessionData>;
-	let mockClient: jest.Mocked<StreamDeckClient>;
+	let mockClient: jest.Mocked<IpcClient>;
 	let bridge: McpBridge;
 
 	beforeAll(async () => {
