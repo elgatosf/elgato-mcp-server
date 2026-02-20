@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals
 
 import { CLEANUP_INTERVAL_MS, DEFAULT_SESSION_TIMEOUT_MS } from "../../constants.js";
 import { cleanupIdleSessions, type SessionData } from "../../transports/http.js";
+import { createMockBridge } from "../helpers/testUtils.js";
 
 describe("HTTP Session Timeout", () => {
 	let mockDateNow: jest.SpiedFunction<typeof Date.now>;
@@ -71,13 +72,14 @@ describe("HTTP Session Timeout", () => {
 		const createMockSession = (lastActivity: number): SessionData => ({
 			lastActivity,
 			transport: { close: jest.fn() } as any,
-			server: null as any,
+			server: {} as any,
 		});
 
 		it("should remove sessions that exceed the timeout threshold", () => {
 			const sessionTimeoutMs = DEFAULT_SESSION_TIMEOUT_MS;
 			const now = 5000000;
 			mockDateNow.mockReturnValue(now);
+			const mockBridge = createMockBridge();
 
 			const sessions = new Map<string, SessionData>();
 
@@ -87,18 +89,20 @@ describe("HTTP Session Timeout", () => {
 			sessions.set("active-session", activeSession);
 			sessions.set("idle-session", idleSession);
 
-			cleanupIdleSessions(sessions, sessionTimeoutMs);
+			cleanupIdleSessions(sessions, sessionTimeoutMs, mockBridge);
 
 			expect(sessions.has("active-session")).toBe(true);
 			expect(sessions.has("idle-session")).toBe(false);
 			expect(activeSession.transport.close).not.toHaveBeenCalled();
 			expect(idleSession.transport.close).toHaveBeenCalled();
+			expect(mockBridge.disposeServer).toHaveBeenCalledWith(idleSession.server);
 		});
 
 		it("should not remove sessions that are within the timeout threshold", () => {
 			const sessionTimeoutMs = DEFAULT_SESSION_TIMEOUT_MS;
 			const now = 5000000;
 			mockDateNow.mockReturnValue(now);
+			const mockBridge = createMockBridge();
 
 			const sessions = new Map<string, SessionData>();
 
@@ -108,18 +112,20 @@ describe("HTTP Session Timeout", () => {
 			sessions.set("recent", recentSession);
 			sessions.set("almost-idle", almostIdleSession);
 
-			cleanupIdleSessions(sessions, sessionTimeoutMs);
+			cleanupIdleSessions(sessions, sessionTimeoutMs, mockBridge);
 
 			expect(sessions.size).toBe(2);
 			expect(recentSession.transport.close).not.toHaveBeenCalled();
 			expect(almostIdleSession.transport.close).not.toHaveBeenCalled();
+			expect(mockBridge.disposeServer).not.toHaveBeenCalled();
 		});
 
 		it("should handle empty sessions map gracefully", () => {
 			const sessionTimeoutMs = DEFAULT_SESSION_TIMEOUT_MS;
 			const sessions = new Map<string, SessionData>();
+			const mockBridge = createMockBridge();
 
-			expect(() => cleanupIdleSessions(sessions, sessionTimeoutMs)).not.toThrow();
+			expect(() => cleanupIdleSessions(sessions, sessionTimeoutMs, mockBridge)).not.toThrow();
 			expect(sessions.size).toBe(0);
 		});
 
@@ -127,6 +133,7 @@ describe("HTTP Session Timeout", () => {
 			const sessionTimeoutMs = DEFAULT_SESSION_TIMEOUT_MS;
 			const now = 10000000;
 			mockDateNow.mockReturnValue(now);
+			const mockBridge = createMockBridge();
 
 			const sessions = new Map<string, SessionData>();
 
@@ -135,10 +142,11 @@ describe("HTTP Session Timeout", () => {
 			sessions.set("idle-3", createMockSession(now - sessionTimeoutMs - 3000));
 			sessions.set("active", createMockSession(now - 1000));
 
-			cleanupIdleSessions(sessions, sessionTimeoutMs);
+			cleanupIdleSessions(sessions, sessionTimeoutMs, mockBridge);
 
 			expect(sessions.size).toBe(1);
 			expect(sessions.has("active")).toBe(true);
+			expect(mockBridge.disposeServer).toHaveBeenCalledTimes(3);
 		});
 	});
 
@@ -195,15 +203,16 @@ describe("HTTP Session Timeout", () => {
 			const shortTimeout = ONE_SECOND_MS;
 			const now = 5000000;
 			mockDateNow.mockReturnValue(now);
+			const mockBridge = createMockBridge();
 
 			const sessions = new Map<string, SessionData>();
 			sessions.set("test-session", {
 				lastActivity: now - 2000,
 				transport: { close: jest.fn() } as any,
-				server: null as any,
+				server: {} as any,
 			});
 
-			cleanupIdleSessions(sessions, shortTimeout);
+			cleanupIdleSessions(sessions, shortTimeout, mockBridge);
 
 			expect(sessions.size).toBe(0);
 		});
@@ -261,21 +270,24 @@ describe("HTTP Session Timeout", () => {
 	});
 
 	describe("Graceful session termination", () => {
-		it("should close transport before removing from map", () => {
+		it("should dispose server and close transport before removing from map", () => {
 			const sessionTimeoutMs = DEFAULT_SESSION_TIMEOUT_MS;
 			const now = 5000000;
 			mockDateNow.mockReturnValue(now);
+			const mockBridge = createMockBridge();
 
 			const closeMock = jest.fn();
+			const mockServer = {} as any;
 			const sessions = new Map<string, SessionData>();
 			sessions.set("idle-session", {
 				lastActivity: now - sessionTimeoutMs - 1000,
 				transport: { close: closeMock } as any,
-				server: null as any,
+				server: mockServer,
 			});
 
-			cleanupIdleSessions(sessions, sessionTimeoutMs);
+			cleanupIdleSessions(sessions, sessionTimeoutMs, mockBridge);
 
+			expect(mockBridge.disposeServer).toHaveBeenCalledWith(mockServer);
 			expect(closeMock).toHaveBeenCalledTimes(1);
 			expect(sessions.has("idle-session")).toBe(false);
 		});

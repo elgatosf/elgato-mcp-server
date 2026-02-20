@@ -2,6 +2,7 @@ import { jest } from "@jest/globals";
 
 import type { ClientManager } from "../../ClientManager.js";
 import type { IpcClient } from "../../IpcClient.js";
+import type { McpBridge } from "../../McpBridge.js";
 import type { CallToolResponse, McpResource, McpTool, ServerInfo, ToolsListResponse } from "../../types.js";
 
 /**
@@ -199,4 +200,33 @@ export function createMockClient(
 		startSignalListener: jest.fn(),
 		...overrides,
 	} as unknown as jest.Mocked<IpcClient>;
+}
+
+/**
+ * Creates a mock McpBridge for testing.
+ * Provides a consistent mock implementation that can be customized via overrides.
+ */
+export function createMockBridge(
+	overrides: Partial<{
+		isConnected: boolean;
+		initialize: jest.Mock;
+		close: jest.Mock;
+		createServer: jest.Mock;
+		disposeServer: jest.Mock;
+		onToolsChanged: jest.Mock;
+		onResourcesChanged: jest.Mock;
+		onClientNotification: jest.Mock;
+	}> = {},
+): jest.Mocked<McpBridge> {
+	return {
+		isConnected: false,
+		initialize: jest.fn(),
+		close: jest.fn(),
+		createServer: jest.fn(),
+		disposeServer: jest.fn(),
+		onToolsChanged: jest.fn(),
+		onResourcesChanged: jest.fn(),
+		onClientNotification: jest.fn(),
+		...overrides,
+	} as unknown as jest.Mocked<McpBridge>;
 }

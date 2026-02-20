@@ -150,6 +150,157 @@ describe("McpBridge", () => {
 		});
 	});
 
+	describe("disposeServer", () => {
+		it("should remove all resource subscriptions for a server", async () => {
+			(mockClientManager as any).isConnected = true;
+
+			const serverA = bridge.createServer();
+			const transportA = new MockTransport();
+			await serverA.connect(transportA);
+
+			const serverB = bridge.createServer();
+			const transportB = new MockTransport();
+			await serverB.connect(transportB);
+
+			// Subscribe both servers to resources
+			transportA.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "resources/subscribe",
+				params: { uri: "streamdeck://test/resource1" },
+			});
+			await transportA.waitForOutgoingMessage();
+
+			transportA.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 2,
+				method: "resources/subscribe",
+				params: { uri: "streamdeck://test/resource2" },
+			});
+			await transportA.waitForOutgoingMessage();
+
+			transportB.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 3,
+				method: "resources/subscribe",
+				params: { uri: "streamdeck://test/resource1" },
+			});
+			await transportB.waitForOutgoingMessage();
+
+			transportA.clearOutgoingMessages();
+			transportB.clearOutgoingMessages();
+
+			// Dispose serverA
+			bridge.disposeServer(serverA);
+
+			// Trigger a resource update notification
+			const onNotificationCallback = mockClientManager.onNotification.mock.calls[0]?.[0];
+			if (onNotificationCallback) {
+				onNotificationCallback("notifications/resources/updated", { uri: "streamdeck://test/resource1" });
+			}
+
+			await wait(10);
+
+			// ServerA should NOT receive notification (it was disposed)
+			const notificationsA = transportA
+				.getOutgoingMessages()
+				.filter((msg) => "method" in msg && msg.method === "notifications/resources/updated");
+			expect(notificationsA).toHaveLength(0);
+
+			// ServerB should still receive notification
+			const notificationsB = transportB
+				.getOutgoingMessages()
+				.filter((msg) => "method" in msg && msg.method === "notifications/resources/updated");
+			expect(notificationsB).toHaveLength(1);
+		});
+
+		it("should remove activeToolCalls entries for a disposed server", async () => {
+			(mockClientManager as any).isConnected = true;
+			mockClientManager.getTools.mockReturnValue([createMockTool()] as any);
+
+			// Create a deferred promise to control when callTool resolves
+			let resolveToolCall!: () => void;
+			const toolCallPromise = new Promise<void>((resolve) => {
+				resolveToolCall = resolve;
+			});
+
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			mockClientManager.callTool.mockImplementation(async (): Promise<any> => {
+				await toolCallPromise;
+				return { id: "1", result: { success: true } };
+			});
+
+			const mcpServer = bridge.createServer();
+			const mockTransport = new MockTransport();
+			mockTransport.sessionId = "test-session-dispose";
+			await mcpServer.connect(mockTransport);
+
+			// Simulate a tools/call request to populate activeToolCalls
+			const toolCallRequest = {
+				jsonrpc: "2.0" as const,
+				id: 99,
+				method: "tools/call",
+				params: { name: "test_tool", arguments: {} },
+			};
+
+			mockTransport.simulateIncomingMessage(toolCallRequest);
+			await wait(50);
+
+			expect(mockClientManager.callTool).toHaveBeenCalled();
+			const capturedCorrelationId = mockClientManager.callTool.mock.calls[0]?.[2];
+			expect(capturedCorrelationId).toBeDefined();
+
+			// Get the onElicitation callback
+			const onElicitationCallback = mockClientManager.onElicitation.mock.calls[0]?.[0];
+			expect(onElicitationCallback).toBeDefined();
+
+			// Dispose the server while tool call is in progress
+			bridge.disposeServer(mcpServer);
+
+			// After dispose, elicitation should decline since activeToolCalls was cleared
+			if (onElicitationCallback) {
+				const resultAfter = await onElicitationCallback({
+					message: "Test after dispose",
+					mode: "form",
+					requestedSchema: { type: "object" },
+					relatedToolCallId: capturedCorrelationId as string,
+				});
+
+				expect(resultAfter).toEqual({ action: "decline" });
+			}
+
+			resolveToolCall();
+		});
+
+		it("should handle disposing a server with no subscriptions", () => {
+			const server = bridge.createServer();
+
+			// Should not throw when disposing a server with no subscriptions
+			expect(() => bridge.disposeServer(server)).not.toThrow();
+		});
+
+		it("should handle disposing the same server multiple times", async () => {
+			(mockClientManager as any).isConnected = true;
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			// Subscribe to a resource
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "resources/subscribe",
+				params: { uri: "streamdeck://test/resource" },
+			});
+			await transport.waitForOutgoingMessage();
+
+			// Dispose twice - should not throw
+			expect(() => bridge.disposeServer(server)).not.toThrow();
+			expect(() => bridge.disposeServer(server)).not.toThrow();
+		});
+	});
+
 	describe("callback notifications", () => {
 		it("should register tools changed callback", () => {
 			const callback = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);

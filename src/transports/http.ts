@@ -29,12 +29,18 @@ export interface SessionData {
  * Removes idle sessions that exceed the timeout threshold.
  * @param sessions - Map of active sessions to check
  * @param sessionTimeoutMs - Maximum idle time in milliseconds before cleanup
+ * @param bridge - The MCP bridge instance for disposing server resources
  */
-export function cleanupIdleSessions(sessions: Map<string, SessionData>, sessionTimeoutMs: number): void {
+export function cleanupIdleSessions(
+	sessions: Map<string, SessionData>,
+	sessionTimeoutMs: number,
+	bridge: McpBridge,
+): void {
 	const now = Date.now();
 	for (const [sessionId, session] of sessions) {
 		const idleTime = now - session.lastActivity;
 		if (idleTime > sessionTimeoutMs) {
+			bridge.disposeServer(session.server);
 			session.transport.close();
 			sessions.delete(sessionId);
 			log.info(`Session ${sessionId} timed out after ${Math.round(idleTime / 1000)}s of inactivity`);
@@ -70,6 +76,7 @@ export function createHttpTransportApp(
 			const sid = transport.sessionId;
 			if (sid && sessions.has(sid)) {
 				log.debug(`Transport closed for session ${sid}, removing from sessions map`);
+				bridge.disposeServer(sessionData.server);
 				sessions.delete(sid);
 			}
 		};
@@ -190,6 +197,7 @@ export function createHttpTransportApp(
 
 		const session = sessions.get(sessionId);
 		if (session) {
+			bridge.disposeServer(session.server);
 			session.transport.close();
 			sessions.delete(sessionId);
 			log.debug(`Session deleted: ${sessionId}`);
@@ -299,7 +307,7 @@ export async function startHttpTransport(options: HttpTransportOptions = {}): Pr
 	});
 
 	const cleanupIntervalId = setInterval(() => {
-		cleanupIdleSessions(sessions, sessionTimeoutMs);
+		cleanupIdleSessions(sessions, sessionTimeoutMs, bridge);
 	}, CLEANUP_INTERVAL_MS);
 
 	const cleanup = (): void => {
