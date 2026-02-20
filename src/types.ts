@@ -51,34 +51,6 @@ export interface ResourcesReadRequest extends RequestBase {
 }
 
 /**
- * Resources subscribe request.
- */
-export interface ResourcesSubscribeRequest extends RequestBase {
-	method: "resources_subscribe";
-	uri: string;
-}
-
-/**
- * Resources unsubscribe request.
- */
-export interface ResourcesUnsubscribeRequest extends RequestBase {
-	method: "resources_unsubscribe";
-	uri: string;
-}
-
-/**
- * Union type for all IPC requests.
- */
-export type IpcRequest =
-	| CallToolRequest
-	| ResourcesListRequest
-	| ResourcesReadRequest
-	| ResourcesSubscribeRequest
-	| ResourcesUnsubscribeRequest
-	| ServerInfoRequest
-	| ToolsListRequest;
-
-/**
  * Error structure for MCP responses.
  */
 export interface McpError {
@@ -237,20 +209,12 @@ export interface ResourcesReadResponse extends ResponseBase {
 }
 
 /**
- * Resources subscribe/unsubscribe response (empty result on success).
- */
-export interface ResourcesSubscribeResponse extends ResponseBase {
-	result?: Record<string, never>;
-}
-
-/**
  * Union type for all IPC responses.
  */
 export type IpcResponse =
 	| CallToolResponse
 	| ResourcesListResponse
 	| ResourcesReadResponse
-	| ResourcesSubscribeResponse
 	| ResponseBase
 	| ServerInfoResponse
 	| ToolsListResponse;
