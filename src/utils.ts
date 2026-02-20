@@ -1,12 +1,36 @@
-import { parseArgs } from "node:util";
 import type { Resource, Tool } from "@modelcontextprotocol/sdk/types.js";
+import { parseArgs } from "node:util";
 
-import { LOG_PREFIX } from "./constants.js";
+import { LOG_PREFIX, TOOL_PREFIX_SEPARATOR } from "./constants.js";
 import type { CliOptions, McpResource, McpTool } from "./types.js";
 
 /**
- * Converts Stream Deck tools to MCP tool format.
- * @param tools - Array of McpTool definitions.
+ * Prefixes a tool or resource name with an app name using the standard separator.
+ * @param appName - The app name to use as prefix (e.g. `"streamdeck"`).
+ * @param itemName - The tool or resource name/URI to prefix.
+ * @returns The prefixed name in the format `appName__itemName`.
+ */
+export function prefixName(appName: string, itemName: string): string {
+	return `${appName}${TOOL_PREFIX_SEPARATOR}${itemName}`;
+}
+
+/**
+ * Splits a prefixed name into app name and item name at the first separator occurrence.
+ * @param prefixedName - The prefixed name in the format `appName__itemName`.
+ * @returns Object with `appName` and `itemName`, or `null` if no prefix separator found.
+ */
+export function unprefixName(prefixedName: string): { appName: string; itemName: string } | null {
+	const idx = prefixedName.indexOf(TOOL_PREFIX_SEPARATOR);
+	if (idx === -1) return null;
+	return {
+		appName: prefixedName.slice(0, idx),
+		itemName: prefixedName.slice(idx + TOOL_PREFIX_SEPARATOR.length),
+	};
+}
+
+/**
+ * Converts IPC wire-format tools to MCP SDK tool format.
+ * @param tools - Array of McpTool definitions from the IPC protocol.
  * @returns Array of MCP Tool definitions.
  */
 export function convertToMcpTools(tools: McpTool[]): Tool[] {
@@ -23,8 +47,8 @@ export function convertToMcpTools(tools: McpTool[]): Tool[] {
 }
 
 /**
- * Converts Stream Deck resources to MCP resource format.
- * @param resources - Array of McpResource definitions.
+ * Converts IPC wire-format resources to MCP SDK resource format.
+ * @param resources - Array of McpResource definitions from the IPC protocol.
  * @returns Array of MCP Resource definitions.
  */
 export function convertToMcpResources(resources: McpResource[]): Resource[] {
@@ -103,7 +127,7 @@ export function parseCliArgs(args: string[]): CliOptions {
  */
 export function printHelp(): void {
 	console.log(`
-Usage: mcp-server-streamdeck [options]
+Usage: mcp-server-elgato [options]
 
 Options:
   --transport <mode>  Transport mode: 'stdio' (default) or 'http'

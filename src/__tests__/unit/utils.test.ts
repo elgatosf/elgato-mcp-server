@@ -1,5 +1,6 @@
 import { describe, expect, it, jest } from "@jest/globals";
 import type { Resource, Tool } from "@modelcontextprotocol/sdk/types.js";
+
 import { convertToMcpResources, convertToMcpTools, log, parseCliArgs, printHelp } from "../../utils.js";
 import { createMockResource, createMockTool } from "../helpers/testUtils.js";
 
@@ -302,7 +303,7 @@ describe("utils", () => {
 
 			expect(consoleLogSpy).toHaveBeenCalledTimes(1);
 			const output = consoleLogSpy.mock.calls[0]?.[0] as string;
-			expect(output).toContain("Usage: mcp-server-streamdeck");
+			expect(output).toContain("Usage: mcp-server-elgato");
 			expect(output).toContain("--transport");
 			expect(output).toContain("--http");
 			expect(output).toContain("--port");
@@ -313,4 +314,3 @@ describe("utils", () => {
 		});
 	});
 });
-

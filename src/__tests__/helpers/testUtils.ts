@@ -1,5 +1,6 @@
 import { jest } from "@jest/globals";
 
+import type { ClientManager } from "../../ClientManager.js";
 import type { IpcClient } from "../../IpcClient.js";
 import type { CallToolResponse, McpResource, McpTool, ServerInfo, ToolsListResponse } from "../../types.js";
 
@@ -116,6 +117,49 @@ export function createDeferred<T>(): {
 		reject = rej;
 	});
 	return { promise, resolve, reject };
+}
+
+/**
+ * Creates a mock ClientManager for testing.
+ * Provides a consistent mock implementation that can be customized via overrides.
+ */
+export function createMockClientManager(
+	overrides: Partial<{
+		isConnected: boolean;
+		connectedClients: string[];
+		initialize: jest.Mock;
+		close: jest.Mock;
+		getTools: jest.Mock;
+		getResources: jest.Mock;
+		getServerInfo: jest.Mock;
+		callTool: jest.Mock;
+		readResource: jest.Mock;
+		onToolsChanged: jest.Mock;
+		onResourcesChanged: jest.Mock;
+		onNotification: jest.Mock;
+		onElicitation: jest.Mock;
+		onClientConnected: jest.Mock;
+		onClientDisconnected: jest.Mock;
+	}> = {},
+): jest.Mocked<ClientManager> {
+	return {
+		isConnected: false,
+		connectedClients: [],
+		initialize: jest.fn(),
+		close: jest.fn(),
+		getTools: jest.fn().mockReturnValue([]),
+		getResources: jest.fn().mockReturnValue([]),
+		getServerInfo: jest.fn().mockReturnValue({ name: "Elgato MCP Server", version: "1.0.0" }),
+		callTool: jest.fn(),
+		readResource: jest.fn(),
+		onToolsChanged: jest.fn(),
+		onResourcesChanged: jest.fn(),
+		onNotification: jest.fn(),
+		onElicitation: jest.fn(),
+		onClientConnected: jest.fn(),
+		onClientDisconnected: jest.fn(),
+		...overrides,
+	} as unknown as jest.Mocked<ClientManager>;
 }
 
 /**
