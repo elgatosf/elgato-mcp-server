@@ -29,3 +29,6 @@ dist
 
 # Test coverage
 coverage/
+
+# Work in progress / scratch files
+.wip/
