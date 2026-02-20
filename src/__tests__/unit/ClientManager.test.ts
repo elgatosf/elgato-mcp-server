@@ -373,6 +373,9 @@ describe("ClientManager", () => {
 	// -------------------------------------------------------------------------
 
 	describe("callTool", () => {
+		let callToolMockClient1: ReturnType<typeof createMockClient>;
+		let callToolMockClient2: ReturnType<typeof createMockClient>;
+
 		beforeEach(async () => {
 			const {
 				manager: m,
@@ -380,15 +383,17 @@ describe("ClientManager", () => {
 				mockClient2,
 			} = createTestManager({
 				app1Connected: true,
-				app2Connected: false,
+				app2Connected: true,
 			});
 			manager = m;
+			callToolMockClient1 = mockClient1;
+			callToolMockClient2 = mockClient2;
 
 			mockClient1.connect.mockResolvedValue(true);
-			mockClient2.connect.mockResolvedValue(false);
+			mockClient2.connect.mockResolvedValue(true);
 			mockClient1.getTools.mockResolvedValue([createMockTool({ name: "toggle_light" })]);
+			mockClient2.getTools.mockResolvedValue([createMockTool({ name: "play_sound" })]);
 			mockClient1.getResources.mockResolvedValue([]);
-			mockClient2.getTools.mockResolvedValue([]);
 			mockClient2.getResources.mockResolvedValue([]);
 
 			await manager.initialize();
@@ -396,13 +401,16 @@ describe("ClientManager", () => {
 
 		it("should route prefixed tool call to the correct client", async () => {
 			const expectedResponse: CallToolResponse = { id: "1", result: { data: "ok" } };
-			// Get client1 mock from the manager (via closure in createTestManager)
-			// We need to capture it before the test
-			const tools = manager.getTools();
-			expect(tools[0]!.name).toBe("app1__toggle_light");
+			callToolMockClient1.callTool.mockResolvedValue(expectedResponse);
 
-			// The factory created client1 for app1 - we need to set up expectation on it
-			// Since createTestManager captures the mock, let's recreate inline
+			const result = await manager.callTool("app1__toggle_light", { brightness: 100 }, "req-123");
+
+			// Verify correct client was called with stripped prefix
+			expect(callToolMockClient1.callTool).toHaveBeenCalledWith("toggle_light", { brightness: 100 }, "req-123");
+			expect(result).toBe(expectedResponse);
+
+			// Verify the other client was NOT called (multi-client routing discrimination)
+			expect(callToolMockClient2.callTool).not.toHaveBeenCalled();
 		});
 
 		it("should strip the prefix before calling the underlying client", async () => {
