@@ -3,7 +3,7 @@ import { config } from "@elgato/eslint-config";
 export default [
 	...config.recommended,
 	{
-		ignores: ["**/*.test.ts", "**/*.test.js", "**/__tests__/**", "**/tests/**"],
+		ignores: ["**/example/**", "**/*.test.ts", "**/*.test.js", "**/__tests__/**", "**/tests/**"],
 	},
 	{
 		rules: {

@@ -81,19 +81,31 @@ export function convertToMcpResources(resources: McpResource[]): Resource[] {
  * All messages are prefixed with the MCP Bridge prefix and severity label.
  */
 export const log = {
-	/** Logs an error message to stderr. Always outputs regardless of verbose mode. */
+	/**
+	 * Logs an error message to stderr. Always outputs regardless of verbose mode.
+	 * @param args - Arguments to log.
+	 */
 	error: (...args: unknown[]): void => {
 		console.error(LOG_PREFIX, "ERROR:", ...args);
 	},
-	/** Logs a warning message to stderr. Always outputs regardless of verbose mode. */
+	/**
+	 * Logs a warning message to stderr. Always outputs regardless of verbose mode.
+	 * @param args - Arguments to log.
+	 */
 	warn: (...args: unknown[]): void => {
 		console.error(LOG_PREFIX, "WARN:", ...args);
 	},
-	/** Logs an informational message to stderr. Only outputs when verbose mode is enabled. */
+	/**
+	 * Logs an informational message to stderr. Only outputs when verbose mode is enabled.
+	 * @param args - Arguments to log.
+	 */
 	info: (...args: unknown[]): void => {
 		if (verbose) console.error(LOG_PREFIX, "INFO:", ...args);
 	},
-	/** Logs a debug message to stderr. Only outputs when verbose mode is enabled. */
+	/**
+	 * Logs a debug message to stderr. Only outputs when verbose mode is enabled.
+	 * @param args - Arguments to log.
+	 */
 	debug: (...args: unknown[]): void => {
 		if (verbose) console.error(LOG_PREFIX, "DEBUG:", ...args);
 	},
