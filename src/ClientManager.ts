@@ -307,8 +307,9 @@ export class ClientManager {
 			}
 		}
 
-		this.cachedTools = newTools;
-		this.cachedResources = newResources;
+		// Sort for deterministic ordering to reduce unnecessary change notifications
+		this.cachedTools = newTools.sort((a, b) => a.name.localeCompare(b.name));
+		this.cachedResources = newResources.sort((a, b) => a.uri.localeCompare(b.uri));
 		this.toolOwnership = newToolOwnership;
 		this.resourceOwnership = newResourceOwnership;
 	}
