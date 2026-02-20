@@ -110,7 +110,7 @@ export interface ToolAnnotations {
 /**
  * The sender or recipient of messages and data in a conversation.
  */
-export type Role = 'assistant' | 'user';
+export type Role = "assistant" | "user";
 
 /**
  * Resource annotations providing hints about resource behavior.
@@ -323,6 +323,16 @@ export type ElicitationCallback = (params: ElicitationParams) => Promise<Elicita
 export type TransportMode = "http" | "stdio";
 
 /**
+ * Definition of a known app in the predefined registry.
+ */
+export interface AppDefinition {
+	/** Display name used for tool/resource prefixing and logging. */
+	name: string;
+	/** Base name used to derive platform-specific socket paths. */
+	socketBaseName: string;
+}
+
+/**
  * CLI options parsed from command line arguments.
  */
 export interface CliOptions {
@@ -330,4 +340,24 @@ export interface CliOptions {
 	port: number;
 	ngrok: boolean;
 	help: boolean;
+}
+
+/**
+ * Configuration for the ClientManager.
+ */
+export interface ClientManagerConfig {
+	/** List of known apps to connect to. Defaults to KNOWN_APPS from constants. */
+	apps?: AppDefinition[];
+}
+
+/**
+ * Configuration for a single IPC client connection.
+ */
+export interface IpcClientConfig {
+	/** Display name for the app, used for prefixing and logging. */
+	name: string;
+	/** Signal socket path for reconnection notifications. */
+	signalSocketPath: string;
+	/** Main IPC socket path. */
+	socketPath: string;
 }
