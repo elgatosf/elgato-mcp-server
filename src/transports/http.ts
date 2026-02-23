@@ -123,7 +123,7 @@ export function createHttpTransportApp(
 	app.get("/health", (_req: Request, res: Response) => {
 		res.json({
 			status: "ok",
-			streamDeckConnected: bridge.isConnected,
+			AppConnected: bridge.isConnected,
 		});
 	});
 

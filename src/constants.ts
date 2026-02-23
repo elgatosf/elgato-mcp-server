@@ -97,7 +97,7 @@ export const MCP_ERROR_CODES = {
 	SERVER_ERROR: -32000,
 } as const;
 
-/** SDK notification methods received from Stream Deck. */
+/** SDK notification methods received from connected apps. */
 export const SDK_NOTIFICATIONS = {
 	TOOLS_LIST_CHANGED: "notifications/tools/list_changed",
 	RESOURCES_LIST_CHANGED: "notifications/resources/list_changed",

@@ -1,7 +1,7 @@
 /**
- * Example IPC app for manual testing of the streamdeck-mcp bridge.
+ * Example IPC app for manual testing of the Elgato MCP Server.
  *
- * Simulates the "Stream Deck" side of the IPC connection.
+ * Simulates the app (e.g. Stream Deck) side of the IPC connection.
  * The bridge connects to this app as a client.
  *
  * Usage: node example/example-app.js
@@ -410,7 +410,7 @@ function handleResourceRead(socket, id, uri) {
 				uri,
 				mimeType: "text/plain",
 				content: [
-					"Example App — streamdeck-mcp manual testing tool",
+					"Example App — Elgato MCP Server manual testing tool",
 					"",
 					"Tools:",
 					"  echo            - Echoes back text",

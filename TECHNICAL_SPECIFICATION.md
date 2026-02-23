@@ -476,9 +476,9 @@ Communication with Stream Deck uses JSON messages terminated by newline (`\n`).
 {
   "id": "1",
   "result": {
-    "name": "streamdeck-mcp",
+    "name": "Elgato MCP Server",
     "version": "1.0.0",
-    "title": "Stream Deck MCP Server",
+    "title": "Elgato MCP Server",
     "icons": [...]
   }
 }
@@ -579,14 +579,14 @@ The bridge uses the low-level Server API (`server.server.setRequestHandler`) ins
 3. Allows returning cached tools without re-registration on each request
 
 ```typescript
-// Custom ListTools handler - returns cached tools from Stream Deck
+// Custom ListTools handler - returns cached tools from ClientManager
 server.server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return { tools: convertToMcpTools(cachedTools) };
+    return { tools: clientManager.getTools() };
 });
 
-// Custom CallTool handler - forwards to Stream Deck
+// Custom CallTool handler - forwards to ClientManager which routes to the correct app
 server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const result = await streamDeckClient.callTool(name, args);
+    const result = await clientManager.callTool(request.params.name, request.params.arguments ?? {});
     return { content: [{ type: "text", text: JSON.stringify(result) }] };
 });
 ```
@@ -725,8 +725,13 @@ this.signalServer = net.createServer((clientSocket) => {
 
 ```typescript
 // Register callback for connection events
-streamDeckClient.onConnected(async () => {
-    await discoverServerAndTools();
+clientManager.onClientConnected(async (appName) => {
+    console.log(`${appName} connected`);
+    // ClientManager automatically refreshes tools/resources and notifies callbacks
+});
+
+// Register callback for tools changed events (fired after any client connects/disconnects)
+bridge.onToolsChanged(async () => {
     await mcpServer.sendToolListChanged();
 });
 ```
@@ -794,7 +799,7 @@ private onData(data: Buffer | string): void {
 
 ```typescript
 const shutdown = async () => {
-    streamDeckClient.disconnect();
+    bridge.close();  // Closes all managed clients via ClientManager
     if (httpServerInstance) {
         httpServerInstance.close();
     }

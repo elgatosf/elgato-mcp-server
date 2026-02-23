@@ -1,13 +1,13 @@
 # Example App
 
-A self-contained dummy IPC server for manually testing the `streamdeck-mcp` bridge without a real Stream Deck. It listens on a Unix socket and speaks the same newline-delimited JSON protocol as the Stream Deck plugin.
+A self-contained dummy IPC server for manually testing the `mcp-server` bridge without a real app (e.g. Stream Deck). It listens on a Unix socket and speaks the same newline-delimited JSON protocol as the Stream Deck plugin.
 
 ---
 
 ## Prerequisites
 
 - Node.js 18+ (ESM support required)
-- The `streamdeck-mcp` bridge built (`pnpm build`)
+- The `mcp-server` bridge built (`pnpm build`)
 
 ---
 

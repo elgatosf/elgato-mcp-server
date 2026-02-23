@@ -4,7 +4,7 @@ import { startStdioTransport } from "./transports/stdio.js";
 import { log, parseCliArgs, printHelp, setVerbose } from "./utils.js";
 
 /**
- * Main entry point for the MCP Stream Deck bridge.
+ * Main entry point for the Elgato MCP Server.
  */
 async function main(): Promise<void> {
 	const args = process.argv.slice(2);

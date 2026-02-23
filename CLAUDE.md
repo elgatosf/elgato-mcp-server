@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MCP server bridging AI assistants (Claude Desktop) and Elgato Stream Deck via the Model Context Protocol. The bridge discovers tools/resources from Stream Deck over IPC and exposes them to MCP clients through stdio or HTTP transports.
+MCP server bridging AI assistants (Claude Desktop) and Elgato apps (e.g., Stream Deck) via the Model Context Protocol. The bridge discovers tools/resources from connected apps over IPC and exposes them to MCP clients through stdio or HTTP transports.
 
 ## Commands
 
@@ -31,17 +31,19 @@ node --experimental-vm-modules node_modules/jest/bin/jest.js -t "test name patte
 
 ## Architecture
 
-**Data flow:** MCP Client → Transport (stdio/HTTP) → McpBridge → StreamDeckClient → Stream Deck IPC socket
+**Data flow:** MCP Client → Transport (stdio/HTTP) → McpBridge → ClientManager → IpcClient → App IPC socket
 
-Three core components:
+Four core components:
 
-- **StreamDeckClient** (`src/StreamDeckClient.ts`) — IPC socket client for Stream Deck. Manages connection lifecycle with dual reconnection strategy (signal socket + polling fallback). Handles request/response correlation with timeouts. Platform-aware: Unix sockets on macOS/Linux, named pipes on Windows.
+- **IpcClient** (`src/IpcClient.ts`) — Generic IPC socket client for communicating with a single app. Manages connection lifecycle with dual reconnection strategy (signal socket + polling fallback). Handles request/response correlation with timeouts. Platform-aware: Unix sockets on macOS/Linux, named pipes on Windows.
 
-- **McpBridge** (`src/McpBridge.ts`) — Protocol bridge creating the MCP server with tool/resource handlers. Caches tools and resources, manages change notifications, and forwards elicitation requests. Two factory functions: `createInitializedBridge()` for HTTP (manual transport attachment) and `createConnectedBridge(transport)` for stdio (single transport).
+- **ClientManager** (`src/ClientManager.ts`) — Manages multiple IpcClient instances (one per known app). Aggregates tools and resources with `appname__` prefixes and routes tool calls to the correct client. Forwards connection events and notifications.
+
+- **McpBridge** (`src/McpBridge.ts`) — Protocol bridge creating the MCP server with tool/resource handlers. Delegates to ClientManager for tool/resource operations, manages change notifications, and forwards elicitation requests. Two factory functions: `createInitializedBridge()` for HTTP (manual transport attachment) and `createConnectedBridge(transport)` for stdio (single transport).
 
 - **Transport layer** (`src/transports/`) — `stdio.ts` wraps StdioServerTransport for Claude Desktop. `http.ts` runs Express with StreamableHTTPServerTransport, session management, idle timeout cleanup, CORS, and optional ngrok tunneling.
 
-Supporting modules: `types.ts` (IPC protocol types), `constants.ts` (socket paths, timeouts), `utils.ts` (tool/resource conversion, CLI parsing).
+Supporting modules: `types.ts` (IPC protocol types), `constants.ts` (socket paths, timeouts, app registry), `utils.ts` (tool/resource conversion, CLI parsing).
 
 ## Development Workflow
 
