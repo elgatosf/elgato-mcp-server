@@ -1,7 +1,15 @@
 import { afterEach, describe, expect, it, jest } from "@jest/globals";
 import type { Resource, Tool } from "@modelcontextprotocol/sdk/types.js";
 
-import { convertToMcpResources, convertToMcpTools, log, parseCliArgs, printHelp, setVerbose } from "../../utils.js";
+import {
+	convertToMcpResources,
+	convertToMcpTools,
+	log,
+	parseCliArgs,
+	printHelp,
+	setVerbose,
+	unprefixName,
+} from "../../utils.js";
 import { createMockResource, createMockTool } from "../helpers/testUtils.js";
 
 describe("utils", () => {
@@ -203,6 +211,65 @@ describe("utils", () => {
 			const result = convertToMcpResources([mcpResource]);
 
 			expect(result[0]?._meta).toEqual({ custom: "data", version: 2 });
+		});
+	});
+
+	describe("unprefixName", () => {
+		it("should correctly split valid prefixed name", () => {
+			const result = unprefixName("app__tool");
+
+			expect(result).toEqual({
+				appName: "app",
+				itemName: "tool",
+			});
+		});
+
+		it("should return null for names without separator", () => {
+			const result = unprefixName("toolname");
+
+			expect(result).toBeNull();
+		});
+
+		it("should split at the FIRST occurrence only with multiple separators", () => {
+			const result = unprefixName("app__sub__tool");
+
+			expect(result).toEqual({
+				appName: "app",
+				itemName: "sub__tool",
+			});
+		});
+
+		it("should return null for empty string", () => {
+			const result = unprefixName("");
+
+			expect(result).toBeNull();
+		});
+
+		it("should handle separator at start (empty app name)", () => {
+			const result = unprefixName("__tool");
+
+			expect(result).toEqual({
+				appName: "",
+				itemName: "tool",
+			});
+		});
+
+		it("should handle separator at end (empty item name)", () => {
+			const result = unprefixName("app__");
+
+			expect(result).toEqual({
+				appName: "app",
+				itemName: "",
+			});
+		});
+
+		it("should handle only separator (both empty)", () => {
+			const result = unprefixName("__");
+
+			expect(result).toEqual({
+				appName: "",
+				itemName: "",
+			});
 		});
 	});
 
