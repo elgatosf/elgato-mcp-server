@@ -244,6 +244,76 @@ export class ClientManager {
 	}
 
 	/**
+	 * Handles client connection events asynchronously.
+	 * Refreshes cached data and notifies all registered callbacks.
+	 * @param name - The app name that connected.
+	 */
+	private async handleClientConnected(name: string): Promise<void> {
+		log.info(`${name} connected`);
+		await this.refreshAll();
+		await this.notifyToolsChanged();
+		await this.notifyResourcesChanged();
+		for (const cb of this.onClientConnectedCallbacks) {
+			cb(name);
+		}
+	}
+
+	/**
+	 * Handles client disconnection events asynchronously.
+	 * Refreshes cached data and notifies all registered callbacks.
+	 * @param name - The app name that disconnected.
+	 */
+	private async handleClientDisconnected(name: string): Promise<void> {
+		log.info(`${name} disconnected`);
+		await this.refreshAll();
+		await this.notifyToolsChanged();
+		await this.notifyResourcesChanged();
+		for (const cb of this.onClientDisconnectedCallbacks) {
+			cb(name);
+		}
+	}
+
+	/**
+	 * Handles notifications from a client asynchronously.
+	 * Processes list-changed notifications with refresh-then-notify pattern,
+	 * and forwards other notifications to registered callbacks.
+	 * @param name - The app name that sent the notification.
+	 * @param method - The notification method name.
+	 * @param params - Optional notification parameters.
+	 */
+	private async handleClientNotification(name: string, method: string, params?: unknown): Promise<void> {
+		// Handle list-changed notifications with refresh-then-notify pattern
+		// This ensures cached data is fresh before MCP clients are notified
+		if (method === SDK_NOTIFICATIONS.TOOLS_LIST_CHANGED) {
+			await this.refreshAll();
+			await this.notifyToolsChanged();
+			return;
+		}
+		if (method === SDK_NOTIFICATIONS.RESOURCES_LIST_CHANGED) {
+			await this.refreshAll();
+			await this.notifyResourcesChanged();
+			return;
+		}
+
+		// Prefix URI for resource updated notifications so subscriptions can match
+		let forwardedParams = params;
+		if (method === SDK_NOTIFICATIONS.RESOURCES_UPDATED && params && typeof params === "object") {
+			const resourceParams = params as { uri?: string };
+			if (resourceParams.uri) {
+				forwardedParams = { ...resourceParams, uri: prefixName(name, resourceParams.uri) };
+			}
+		}
+
+		for (const cb of this.notificationCallbacks) {
+			try {
+				cb(method, forwardedParams);
+			} catch (error) {
+				log.error(`Notification callback error for ${name}:`, error);
+			}
+		}
+	}
+
+	/**
 	 * Dispatches resource-changed notifications to all registered callbacks.
 	 */
 	private async notifyResourcesChanged(): Promise<void> {
@@ -317,62 +387,42 @@ export class ClientManager {
 	/**
 	 * Registers lifecycle callbacks on a single IpcClient, wiring its connect/disconnect/
 	 * notification/elicitation events into the ClientManager's unified event system.
+	 *
+	 * Two different callback patterns are used based on how IpcClient invokes them:
+	 *
+	 * **Fire-and-forget callbacks** (`onConnected`, `onDisconnected`, `onNotification`):
+	 * IpcClient invokes these synchronously without awaiting, and ignores return values.
+	 * We register sync wrappers that delegate to async handlers with explicit `.catch()`
+	 * to prevent unhandled promise rejections.
+	 *
+	 * **Request/response callback** (`onElicitation`):
+	 * IpcClient awaits this callback and needs the returned `ElicitationResponse`.
+	 * It's wrapped in try/catch with timeout handling. We register an async callback
+	 * directly since IpcClient properly handles the Promise.
 	 * @param name - The app name for this client.
 	 * @param client - The IpcClient instance to wire up.
 	 */
 	private setupClientCallbacks(name: string, client: IpcClient): void {
-		client.onConnected(async () => {
-			log.info(`${name} connected`);
-			await this.refreshAll();
-			await this.notifyToolsChanged();
-			await this.notifyResourcesChanged();
-			for (const cb of this.onClientConnectedCallbacks) {
-				cb(name);
-			}
+		// Fire-and-forget: IpcClient calls these synchronously, ignores return values
+		client.onConnected(() => {
+			void this.handleClientConnected(name).catch((error) => {
+				log.error(`Error handling client connection for ${name}:`, error);
+			});
 		});
 
-		client.onDisconnected(async () => {
-			log.info(`${name} disconnected`);
-			await this.refreshAll();
-			await this.notifyToolsChanged();
-			await this.notifyResourcesChanged();
-			for (const cb of this.onClientDisconnectedCallbacks) {
-				cb(name);
-			}
+		client.onDisconnected(() => {
+			void this.handleClientDisconnected(name).catch((error) => {
+				log.error(`Error handling client disconnection for ${name}:`, error);
+			});
 		});
 
-		client.onNotification(async (method, params) => {
-			// Handle list-changed notifications with refresh-then-notify pattern
-			// This ensures cached data is fresh before MCP clients are notified
-			if (method === SDK_NOTIFICATIONS.TOOLS_LIST_CHANGED) {
-				await this.refreshAll();
-				await this.notifyToolsChanged();
-				return;
-			}
-			if (method === SDK_NOTIFICATIONS.RESOURCES_LIST_CHANGED) {
-				await this.refreshAll();
-				await this.notifyResourcesChanged();
-				return;
-			}
-
-			// Prefix URI for resource updated notifications so subscriptions can match
-			let forwardedParams = params;
-			if (method === SDK_NOTIFICATIONS.RESOURCES_UPDATED && params && typeof params === "object") {
-				const resourceParams = params as { uri?: string };
-				if (resourceParams.uri) {
-					forwardedParams = { ...resourceParams, uri: prefixName(name, resourceParams.uri) };
-				}
-			}
-
-			for (const cb of this.notificationCallbacks) {
-				try {
-					cb(method, forwardedParams);
-				} catch (error) {
-					log.error(`Notification callback error for ${name}:`, error);
-				}
-			}
+		client.onNotification((method, params) => {
+			void this.handleClientNotification(name, method, params).catch((error) => {
+				log.error(`Error handling notification for ${name}:`, error);
+			});
 		});
 
+		// Request/response: IpcClient awaits this and needs the returned ElicitationResponse
 		client.onElicitation(async (params) => {
 			if (!this.elicitationCallback) {
 				return { action: "decline" };

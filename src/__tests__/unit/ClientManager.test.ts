@@ -648,7 +648,9 @@ describe("ClientManager", () => {
 			mgr.onToolsChanged(toolsChangedCb);
 
 			// Simulate SDK sending TOOLS_LIST_CHANGED
-			await (notificationCallback as any)?.(SDK_NOTIFICATIONS.TOOLS_LIST_CHANGED, undefined);
+			// Note: callback is sync but delegates to async handler, so we need to wait
+			(notificationCallback as any)?.(SDK_NOTIFICATIONS.TOOLS_LIST_CHANGED, undefined);
+			await new Promise((r) => setTimeout(r, 10));
 
 			// Should have refreshed the cache (called getTools again)
 			expect(mockClient.getTools).toHaveBeenCalled();
@@ -678,7 +680,9 @@ describe("ClientManager", () => {
 			mgr.onResourcesChanged(resourcesChangedCb);
 
 			// Simulate SDK sending RESOURCES_LIST_CHANGED
-			await (notificationCallback as any)?.(SDK_NOTIFICATIONS.RESOURCES_LIST_CHANGED, undefined);
+			// Note: callback is sync but delegates to async handler, so we need to wait
+			(notificationCallback as any)?.(SDK_NOTIFICATIONS.RESOURCES_LIST_CHANGED, undefined);
+			await new Promise((r) => setTimeout(r, 10));
 
 			// Should have refreshed the cache (called getResources again)
 			expect(mockClient.getResources).toHaveBeenCalled();
