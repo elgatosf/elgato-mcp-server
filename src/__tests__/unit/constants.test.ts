@@ -37,11 +37,19 @@ describe("constants", () => {
 		});
 
 		afterEach(() => {
-			Object.defineProperty(process, "platform", { value: originalPlatform });
+			Object.defineProperty(process, "platform", {
+				value: originalPlatform,
+				writable: true,
+				configurable: true,
+			});
 		});
 
 		it("should return unix socket paths on darwin", () => {
-			Object.defineProperty(process, "platform", { value: "darwin" });
+			Object.defineProperty(process, "platform", {
+				value: "darwin",
+				writable: true,
+				configurable: true,
+			});
 
 			const paths = getAppSocketPaths(testApp);
 
@@ -50,7 +58,11 @@ describe("constants", () => {
 		});
 
 		it("should return unix socket paths on linux", () => {
-			Object.defineProperty(process, "platform", { value: "linux" });
+			Object.defineProperty(process, "platform", {
+				value: "linux",
+				writable: true,
+				configurable: true,
+			});
 
 			const paths = getAppSocketPaths(testApp);
 
@@ -59,7 +71,11 @@ describe("constants", () => {
 		});
 
 		it("should return named pipe paths on windows", () => {
-			Object.defineProperty(process, "platform", { value: "win32" });
+			Object.defineProperty(process, "platform", {
+				value: "win32",
+				writable: true,
+				configurable: true,
+			});
 
 			const paths = getAppSocketPaths(testApp);
 
