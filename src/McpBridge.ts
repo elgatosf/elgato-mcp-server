@@ -15,7 +15,7 @@ import {
 
 import { ClientManager } from "./ClientManager.js";
 import { SDK_NOTIFICATIONS } from "./constants.js";
-import type { ElicitationParams } from "./types.js";
+import type { ClientManagerConfig, ElicitationParams } from "./types.js";
 import { log } from "./utils.js";
 
 /**
@@ -401,10 +401,12 @@ export class McpBridge {
 /**
  * Creates and initializes an McpBridge instance.
  * Use this when you need to manage transport connections manually (e.g., HTTP with multiple sessions).
+ * @param config - Optional configuration for the ClientManager (e.g., custom app definitions for testing).
  * @returns The initialized bridge.
  */
-export async function createInitializedBridge(): Promise<McpBridge> {
-	const bridge = new McpBridge();
+export async function createInitializedBridge(config?: ClientManagerConfig): Promise<McpBridge> {
+	const clientManager = config ? new ClientManager(config) : undefined;
+	const bridge = new McpBridge(clientManager);
 	await bridge.initialize();
 	return bridge;
 }
@@ -413,10 +415,11 @@ export async function createInitializedBridge(): Promise<McpBridge> {
  * Creates an initialized McpBridge and connects it to a transport.
  * Use this for single-transport scenarios (e.g., stdio).
  * @param transport - Transport to connect to.
+ * @param config - Optional configuration for the ClientManager (e.g., custom app definitions for testing).
  * @returns The connected bridge.
  */
-export async function createConnectedBridge(transport: Transport): Promise<McpBridge> {
-	const bridge = await createInitializedBridge();
+export async function createConnectedBridge(transport: Transport, config?: ClientManagerConfig): Promise<McpBridge> {
+	const bridge = await createInitializedBridge(config);
 
 	const mcpServer = bridge.createServer();
 	await mcpServer.connect(transport);

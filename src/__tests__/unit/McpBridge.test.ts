@@ -1222,10 +1222,15 @@ describe("McpBridge", () => {
 });
 
 describe("createInitializedBridge", () => {
+	// Use test-specific socket names to avoid conflicts with real Elgato apps
+	const testConfig = {
+		apps: [{ name: "test-app", socketBaseName: "test-mcp-bridge" }],
+	};
+
 	it("should create and initialize a bridge", async () => {
 		// Note: This test uses the real ClientManager which will fail to connect
 		// but should still create and return a bridge in disconnected mode
-		const bridge = await createInitializedBridge();
+		const bridge = await createInitializedBridge(testConfig);
 
 		expect(bridge).toBeInstanceOf(McpBridge);
 		expect(bridge.isConnected).toBe(false);
@@ -1235,9 +1240,14 @@ describe("createInitializedBridge", () => {
 });
 
 describe("createConnectedBridge", () => {
+	// Use test-specific socket names to avoid conflicts with real Elgato apps
+	const testConfig = {
+		apps: [{ name: "test-app", socketBaseName: "test-mcp-bridge" }],
+	};
+
 	it("should create bridge and connect to transport", async () => {
 		const transport = new MockTransport();
-		const bridge = await createConnectedBridge(transport);
+		const bridge = await createConnectedBridge(transport, testConfig);
 
 		expect(bridge).toBeInstanceOf(McpBridge);
 		expect(transport.isStarted()).toBe(true);
@@ -1248,7 +1258,7 @@ describe("createConnectedBridge", () => {
 
 	it("should set up tools changed notification forwarding", async () => {
 		const transport = new MockTransport();
-		const bridge = await createConnectedBridge(transport);
+		const bridge = await createConnectedBridge(transport, testConfig);
 
 		expect(bridge).toBeDefined();
 
@@ -1259,7 +1269,7 @@ describe("createConnectedBridge", () => {
 	it("should handle notification forwarding errors gracefully", async () => {
 		const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
 		const transport = new MockTransport();
-		const bridge = await createConnectedBridge(transport);
+		const bridge = await createConnectedBridge(transport, testConfig);
 
 		// Trigger the onClientNotification callbacks
 		const notificationCallbacks = (bridge as any).notificationForwardCallbacks;
