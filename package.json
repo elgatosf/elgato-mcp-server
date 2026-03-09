@@ -1,6 +1,6 @@
 {
     "name": "@elgato/mcp-server",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "A Model Context Protocol (MCP) server that bridges AI assistants with Elgato apps.",
     "type": "module",
     "bin": {
