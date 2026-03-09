@@ -38,19 +38,19 @@ You can run the Elgato MCP Server directly without installing it globally using 
 
 ```bash
 # Run with stdio transport (default)
-npx @elgato/mcp-server@latest
+npx -y @elgato/mcp-server@latest
 
 # Run with HTTP transport
-npx @elgato/mcp-server@latest --http
+npx -y @elgato/mcp-server@latest --http
 
 # Run with HTTP transport on a custom port
-npx @elgato/mcp-server@latest --http --port 3000
+npx -y @elgato/mcp-server@latest --http --port 3000
 
 # Run with ngrok tunnel
-NGROK_AUTHTOKEN=your_token npx @elgato/mcp-server@latest --http --ngrok
+NGROK_AUTHTOKEN=your_token npx -y @elgato/mcp-server@latest --http --ngrok
 
 # Run with verbose logging
-npx @elgato/mcp-server@latest --verbose
+npx -y @elgato/mcp-server@latest --verbose
 ```
 
 This is useful for trying out the server without a permanent installation, or for use in CI/CD environments.
