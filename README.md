@@ -124,7 +124,7 @@ Alternatively, you can use `npx` to run the server without installing it globall
     "mcpServers": {
         "elgato": {
             "command": "npx",
-            "args": ["@elgato/mcp-server@latest"]
+            "args": ["--yes", "@elgato/mcp-server@latest"]
         }
     }
 }
