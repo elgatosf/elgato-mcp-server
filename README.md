@@ -32,6 +32,29 @@ npm install -g @elgato/mcp-server
 pnpm add -g @elgato/mcp-server
 ```
 
+## Running without Installation
+
+You can run the Elgato MCP Server directly without installing it globally using `npx`:
+
+```bash
+# Run with stdio transport (default)
+npx @elgato/mcp-server@latest
+
+# Run with HTTP transport
+npx @elgato/mcp-server@latest --http
+
+# Run with HTTP transport on a custom port
+npx @elgato/mcp-server@latest --http --port 3000
+
+# Run with ngrok tunnel
+NGROK_AUTHTOKEN=your_token npx @elgato/mcp-server@latest --http --ngrok
+
+# Run with verbose logging
+npx @elgato/mcp-server@latest --verbose
+```
+
+This is useful for trying out the server without a permanent installation, or for use in CI/CD environments.
+
 ## Usage
 
 ### stdio Transport (Default)
@@ -80,6 +103,8 @@ Add the following to your Claude Desktop configuration file:
 **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
 
+### Using Global Installation
+
 ```json
 {
     "mcpServers": {
@@ -89,6 +114,23 @@ Add the following to your Claude Desktop configuration file:
     }
 }
 ```
+
+### Using npx (No Installation Required)
+
+Alternatively, you can use `npx` to run the server without installing it globally:
+
+```json
+{
+    "mcpServers": {
+        "elgato": {
+            "command": "npx",
+            "args": ["@elgato/mcp-server@latest"]
+        }
+    }
+}
+```
+
+> **Note:** The npx-based configuration works with Claude Desktop and other MCP clients that support the stdio transport. The first run may take a moment while npx downloads the package.
 
 ## HTTP Endpoints
 
