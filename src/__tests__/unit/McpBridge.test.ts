@@ -823,6 +823,95 @@ describe("McpBridge", () => {
 			expect((response as any).result.content[0].text).toContain("result");
 		});
 
+		it("should return structuredContent when tool declares outputSchema and data is an object", async () => {
+			(mockClientManager as any).isConnected = true;
+			// Tool list contains the (prefixed) tool with an outputSchema declared
+			mockClientManager.getTools.mockReturnValue([
+				createMockTool({
+					name: "streamdeck__structured_tool",
+					outputSchema: {
+						type: "object",
+						properties: { status: { type: "string" }, count: { type: "number" } },
+					},
+				}),
+			] as any);
+			// The IPC result object itself is the structured payload (no `data` wrapper)
+			const payload = { status: "ok", count: 3 };
+			mockClientManager.callTool.mockResolvedValue({ id: "1", result: payload } as any);
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: { name: "streamdeck__structured_tool", arguments: {} },
+			});
+
+			const response = await transport.waitForOutgoingMessage();
+			// structuredContent must be the raw payload object
+			expect((response as any).result.structuredContent).toEqual(payload);
+			// content must be the backward-compatible JSON-serialized payload (not the IPC wrapper)
+			expect((response as any).result.content[0].text).toBe(JSON.stringify(payload, null, 2));
+		});
+
+		it("should omit structuredContent when tool has no outputSchema", async () => {
+			(mockClientManager as any).isConnected = true;
+			// Tool exists in the list but declares no outputSchema
+			mockClientManager.getTools.mockReturnValue([createMockTool({ name: "streamdeck__plain_tool" })] as any);
+			mockClientManager.callTool.mockResolvedValue({ id: "1", result: { status: "ok" } } as any);
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: { name: "streamdeck__plain_tool", arguments: {} },
+			});
+
+			const response = await transport.waitForOutgoingMessage();
+			// Without an outputSchema, legacy behavior applies: no structuredContent,
+			// and the whole IPC result object is serialized into the text block
+			expect((response as any).result.structuredContent).toBeUndefined();
+			expect((response as any).result.content[0].text).toContain("status");
+		});
+
+		it("should return isError when tool declares outputSchema but result is not a plain object", async () => {
+			(mockClientManager as any).isConnected = true;
+			// Tool declares an outputSchema, but the app returns a non-object result
+			mockClientManager.getTools.mockReturnValue([
+				createMockTool({
+					name: "streamdeck__structured_tool",
+					outputSchema: { type: "object", properties: {} },
+				}),
+			] as any);
+			mockClientManager.callTool.mockResolvedValue({ id: "1", result: "just a string" } as any);
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: { name: "streamdeck__structured_tool", arguments: {} },
+			});
+
+			const response = await transport.waitForOutgoingMessage();
+			// structuredContent must be a JSON object per MCP spec. Returning a success result
+			// without it would make strict clients fail with an opaque protocol error, so the
+			// bridge surfaces the misbehaving app as a diagnosable tool error instead.
+			expect((response as any).result.structuredContent).toBeUndefined();
+			expect((response as any).result.isError).toBe(true);
+			expect((response as any).result.content[0].text).toContain("outputSchema");
+		});
+
 		it("should return error on tools/call when disconnected", async () => {
 			(mockClientManager as any).isConnected = false;
 

@@ -214,13 +214,17 @@ Returns dynamically discovered tools from Stream Deck.
   "tools": [
     {
       "name": "tool_name",
+      "title": "Tool Title",
       "description": "Tool description",
       "inputSchema": { "type": "object", "properties": {...} },
+      "outputSchema": { "type": "object", "properties": {...} },
       "icons": [...]
     }
   ]
 }
 ```
+
+`title`, `outputSchema`, and `_meta` are optional and forwarded as-is when provided by the app.
 
 #### tools/call
 
@@ -235,11 +239,22 @@ Forwards tool invocation to Stream Deck and returns the result.
 }
 ```
 
-**Response (Success):**
+**Response (Success, tool without `outputSchema`):**
 
 ```json
 {
     "content": [{ "type": "text", "text": "..." }]
+}
+```
+
+**Response (Success, tool with `outputSchema`):**
+
+Per MCP spec (2025-06-18), tools that declare an `outputSchema` must return `structuredContent` conforming to that schema. The bridge also includes a JSON-serialized text block for backward compatibility:
+
+```json
+{
+    "content": [{ "type": "text", "text": "{ ... }" }],
+    "structuredContent": { ... }
 }
 ```
 
@@ -506,10 +521,12 @@ Communication with Stream Deck uses JSON messages terminated by newline (`\n`).
 
 **CallToolResponse**
 
+The `result` object itself is the tool's structured payload (there is no `data` wrapper). A non-empty `result.error` string indicates a tool-level failure.
+
 ```json
 {
   "id": "3",
-  "result": { "success": true, "data": {...} }
+  "result": { "layers": [...] }
 }
 ```
 
@@ -584,10 +601,24 @@ server.server.setRequestHandler(ListToolsRequestSchema, async () => {
     return { tools: clientManager.getTools() };
 });
 
-// Custom CallTool handler - forwards to ClientManager which routes to the correct app
+// Custom CallTool handler - forwards to ClientManager which routes to the correct app.
+// If the tool declares an outputSchema, the IPC result object is also returned as
+// `structuredContent` (MCP spec 2025-06-18 requirement). A non-object result from such
+// a tool is surfaced as a tool error (isError) rather than a spec-violating success,
+// since structuredContent must be a JSON object.
 server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const result = await clientManager.callTool(request.params.name, request.params.arguments ?? {});
-    return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    const tool = clientManager.getTools().find((t) => t.name === request.params.name);
+    if (tool?.outputSchema !== undefined) {
+        if (result === null || typeof result !== "object" || Array.isArray(result)) {
+            return {
+                content: [{ type: "text", text: `Tool "${request.params.name}" declares an outputSchema but returned a non-object result` }],
+                isError: true,
+            };
+        }
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result };
+    }
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
 });
 ```
 

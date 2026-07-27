@@ -256,6 +256,41 @@ export class McpBridge {
 					};
 				}
 
+				// Per MCP spec (2025-06-18), tools that declare an `outputSchema` MUST return
+				// `structuredContent` conforming to that schema on success. Strict clients
+				// (e.g. the official TypeScript SDK) reject results that omit it.
+				// Look up the cached tool definition (by prefixed name) to check for an outputSchema.
+				const tool = this.clientManager.getTools().find((t) => t.name === name);
+
+				// The IPC result object itself is the tool's structured payload.
+				// `structuredContent` must be a plain JSON object (outputSchema is always
+				// `type: "object"` at the top level), so only emit it when the result qualifies.
+				if (tool?.outputSchema !== undefined) {
+					if (result === null || typeof result !== "object" || Array.isArray(result)) {
+						// A success result without structuredContent would make strict clients
+						// fail with an opaque protocol error; a tool error (which the spec does
+						// not require structuredContent on) is diagnosable instead.
+						return {
+							content: [
+								{
+									type: "text",
+									text: `Tool "${name}" declares an outputSchema but returned a non-object result`,
+								},
+							],
+							isError: true,
+						};
+					}
+					return {
+						// Backward-compatible fallback recommended by the spec: a text block
+						// containing the JSON-serialized structured payload, for clients that
+						// do not support structured output.
+						content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+						structuredContent: result as Record<string, unknown>,
+					};
+				}
+
+				// Legacy behavior for tools without an outputSchema:
+				// serialize the IPC result into a single text block.
 				return {
 					content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
 				};

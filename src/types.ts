@@ -163,10 +163,13 @@ export interface ToolsListResponse extends ResponseBase {
 
 /**
  * Call tool result.
+ * Note: The IPC protocol returns the tool's structured payload as the result
+ * object itself (there is no `data` wrapper). A non-empty `error` indicates
+ * a tool-level failure.
  */
 export interface CallToolResult {
-	data?: unknown;
 	error?: string;
+	[key: string]: unknown;
 }
 
 /**
