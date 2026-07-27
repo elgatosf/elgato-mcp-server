@@ -292,7 +292,7 @@ export class McpBridge {
 				// Legacy behavior for tools without an outputSchema:
 				// serialize the IPC result into a single text block.
 				return {
-					content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+					content: [{ type: "text", text: JSON.stringify(result ?? null, null, 2) }],
 				};
 			} catch (error) {
 				const message = error instanceof Error ? error.message : "Unknown error";
