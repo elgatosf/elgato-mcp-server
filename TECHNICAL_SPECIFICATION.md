@@ -224,7 +224,7 @@ Returns dynamically discovered tools from Stream Deck.
 }
 ```
 
-`title`, `outputSchema`, and `_meta` are optional and forwarded as-is when provided by the app.
+`title`, `outputSchema`, and `_meta` are optional and forwarded when provided by the app; `inputSchema.type` and `outputSchema.type` default to `"object"` if omitted.
 
 #### tools/call
 
