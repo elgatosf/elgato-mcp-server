@@ -48,9 +48,9 @@ export function convertToMcpTools(tools: McpTool[]): Tool[] {
 		name: tool.name,
 		title: tool.title,
 		description: tool.description,
-		inputSchema: { type: "object" as const, ...tool.inputSchema },
+		inputSchema: { ...tool.inputSchema, type: "object" as const },
 		outputSchema: tool.outputSchema
-			? { type: "object" as const, ...tool.outputSchema }
+			? { ...tool.outputSchema, type: "object" as const }
 			: undefined,
 		annotations: tool.annotations,
 		icons: tool.icons,
