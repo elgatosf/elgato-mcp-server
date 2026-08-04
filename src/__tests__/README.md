@@ -30,12 +30,13 @@ src/__tests__/
 │   ├── MockServer.ts                     # Mock implementation of net.Server
 │   ├── MockTransport.ts                  # Mock implementation of MCP Transport
 │   └── testUtils.ts                      # Helper functions for creating test data
-├── unit/                                 # Unit tests (8 test files, 232 tests)
+├── unit/                                 # Unit tests (8 test files, 252 tests)
 │   ├── constants.test.ts                 # Socket path generation tests (14 tests)
 │   ├── utils.test.ts                     # Utility functions tests (53 tests)
 │   ├── IpcClient.test.ts                 # IPC client tests (65 tests, includes elicitation)
 │   ├── ClientManager.test.ts             # Client manager aggregation tests (42 tests)
 │   ├── McpBridge.test.ts                 # MCP bridge logic tests (72 tests, includes elicitation)
+│   ├── stdio.test.ts                     # stdio transport lifecycle tests (10 tests)
 │   ├── http-server-startup.test.ts       # HTTP server initialization tests (4 tests)
 │   └── http-session-timeout.test.ts      # HTTP session timeout tests (6 tests)
 └── integration/                          # Integration tests (4 test files, 53 tests)
@@ -131,6 +132,15 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Multiple session cleanup
 - Custom timeout configuration
 - Session activity tracking
+
+#### stdio.test.ts (10 tests)
+
+- StdioServerTransport creation
+- SIGINT/SIGTERM handler registration
+- Graceful shutdown on SIGINT/SIGTERM (`bridge.close()` + `process.exit(0)`)
+- stdin `end`/`close` handler registration
+- Graceful shutdown when the MCP client closes stdin
+- Startup log message
 
 ### Integration Tests
 
