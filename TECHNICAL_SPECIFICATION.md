@@ -665,6 +665,7 @@ private sendRequest(request: RequestBase): Promise<ResponseBase> {
 - Default transport mode for Claude Desktop integration
 - Single MCP server instance
 - Uses `StdioServerTransport` from MCP SDK
+- Exits when the MCP client closes the pipe: stdin `end`/`close` triggers the same graceful shutdown as SIGINT/SIGTERM (`bridge.close()` then `process.exit(0)`); HTTP transport is unaffected
 
 ```typescript
 const transport = new StdioServerTransport();

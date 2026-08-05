@@ -9,6 +9,8 @@ describe("stdio transport", () => {
 	let processExitSpy: jest.SpiedFunction<typeof process.exit>;
 	let mockBridge: MockMcpBridge;
 	let signalHandlers: Map<string, (() => void)[]>;
+	let stdinOnSpy: jest.SpiedFunction<typeof process.stdin.on>;
+	let stdinHandlers: Map<string, (() => void)[]>;
 
 	beforeEach(() => {
 		jest.clearAllMocks();
@@ -25,6 +27,20 @@ describe("stdio transport", () => {
 			return process;
 		});
 
+		stdinHandlers = new Map();
+
+		// Spy on process.stdin.on to capture stdin event handlers
+		stdinOnSpy = jest
+			.spyOn(process.stdin, "on")
+			.mockImplementation((event: string | symbol, handler: () => void) => {
+				const eventKey = String(event);
+				if (!stdinHandlers.has(eventKey)) {
+					stdinHandlers.set(eventKey, []);
+				}
+				stdinHandlers.get(eventKey)!.push(handler);
+				return process.stdin;
+			});
+
 		// Spy on process.exit to prevent actual exit
 		processExitSpy = jest.spyOn(process, "exit").mockImplementation((() => {
 			// Do nothing
@@ -34,6 +50,7 @@ describe("stdio transport", () => {
 	afterEach(() => {
 		processOnSpy.mockRestore();
 		processExitSpy.mockRestore();
+		stdinOnSpy.mockRestore();
 	});
 
 	const setupModule = async (): Promise<typeof import("../../transports/stdio.js")> => {
@@ -135,5 +152,63 @@ describe("stdio transport", () => {
 		await stdioModule.startStdioTransport();
 
 		expect(logMock).toHaveBeenCalledWith("MCP Bridge started with stdio transport");
+	});
+
+	it("should register stdin end handler", async () => {
+		const stdioModule = await setupModule();
+		await stdioModule.startStdioTransport();
+
+		expect(stdinOnSpy).toHaveBeenCalledWith("end", expect.any(Function));
+		expect(stdinHandlers.has("end")).toBe(true);
+	});
+
+	it("should register stdin close handler", async () => {
+		const stdioModule = await setupModule();
+		await stdioModule.startStdioTransport();
+
+		expect(stdinOnSpy).toHaveBeenCalledWith("close", expect.any(Function));
+		expect(stdinHandlers.has("close")).toBe(true);
+	});
+
+	it("should call bridge.close() and process.exit(0) when stdin ends", async () => {
+		const stdioModule = await setupModule();
+		await stdioModule.startStdioTransport();
+
+		const endHandlers = stdinHandlers.get("end");
+		expect(endHandlers).toBeDefined();
+		if (!endHandlers) {
+			throw new Error("stdin end handler not registered");
+		}
+		expect(endHandlers.length).toBeGreaterThan(0);
+
+		const handler = endHandlers[0];
+		if (!handler) {
+			throw new Error("stdin end handler is undefined");
+		}
+		handler();
+
+		expect(mockBridge.close).toHaveBeenCalledTimes(1);
+		expect(processExitSpy).toHaveBeenCalledWith(0);
+	});
+
+	it("should call bridge.close() and process.exit(0) when stdin closes", async () => {
+		const stdioModule = await setupModule();
+		await stdioModule.startStdioTransport();
+
+		const closeHandlers = stdinHandlers.get("close");
+		expect(closeHandlers).toBeDefined();
+		if (!closeHandlers) {
+			throw new Error("stdin close handler not registered");
+		}
+		expect(closeHandlers.length).toBeGreaterThan(0);
+
+		const handler = closeHandlers[0];
+		if (!handler) {
+			throw new Error("stdin close handler is undefined");
+		}
+		handler();
+
+		expect(mockBridge.close).toHaveBeenCalledTimes(1);
+		expect(processExitSpy).toHaveBeenCalledWith(0);
 	});
 });
