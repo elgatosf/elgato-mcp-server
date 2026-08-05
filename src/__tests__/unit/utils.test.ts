@@ -72,6 +72,35 @@ describe("utils", () => {
 			]);
 		});
 
+		it("should forward outputSchema with type object defaulting", () => {
+			const mcpTool = createMockTool({
+				name: "structured_tool",
+				title: "Structured Tool",
+				outputSchema: {
+					properties: {
+						status: { type: "string" },
+					},
+				},
+				_meta: { vendor: "elgato" },
+			});
+
+			const result = convertToMcpTools([mcpTool]);
+
+			expect(result[0]?.outputSchema).toEqual({
+				type: "object",
+				properties: {
+					status: { type: "string" },
+				},
+			});
+			expect(result[0]?.title).toBe("Structured Tool");
+			expect(result[0]?._meta).toEqual({ vendor: "elgato" });
+		});
+
+		it("should leave outputSchema undefined when the tool does not declare one", () => {
+			const result = convertToMcpTools([createMockTool({ name: "plain_tool" })]);
+			expect(result[0]?.outputSchema).toBeUndefined();
+		});
+
 		it("should handle empty array", () => {
 			const result = convertToMcpTools([]);
 			expect(result).toEqual([]);

@@ -119,6 +119,39 @@ describe("MCP Protocol Integration Tests", () => {
 			expect((response as any).result.content[0].text).toContain("result");
 		});
 
+		it("should return structuredContent for tools declaring an outputSchema", async () => {
+			// Tool list exposes a (prefixed) tool that declares an outputSchema
+			mockClientManager.getTools.mockReturnValue([
+				createMockTool({
+					name: "streamdeck__structured_tool",
+					outputSchema: {
+						type: "object",
+						properties: { brightness: { type: "number" } },
+					},
+				}),
+			] as any);
+			// The IPC result object itself is the structured payload (no `data` wrapper)
+			const payload = { brightness: 80 };
+			mockClientManager.callTool.mockResolvedValue({ id: "1", result: payload } as any);
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: { name: "streamdeck__structured_tool", arguments: {} },
+			});
+
+			const response = await transport.waitForOutgoingMessage();
+			// Per MCP spec, tools with an outputSchema MUST provide structuredContent,
+			// plus a backward-compatible serialized text block with the same payload
+			expect((response as any).result.structuredContent).toEqual(payload);
+			expect((response as any).result.content[0].text).toBe(JSON.stringify(payload, null, 2));
+		});
+
 		it("should handle tool execution errors", async () => {
 			mockClientManager.callTool.mockResolvedValue(createMockErrorResponse("Tool execution failed") as any);
 

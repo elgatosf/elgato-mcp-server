@@ -46,13 +46,15 @@ export function unprefixName(prefixedName: string): { appName: string; itemName:
 export function convertToMcpTools(tools: McpTool[]): Tool[] {
 	return tools.map((tool) => ({
 		name: tool.name,
+		title: tool.title,
 		description: tool.description,
-		inputSchema: {
-			type: "object" as const,
-			...tool.inputSchema,
-		},
+		inputSchema: { ...tool.inputSchema, type: "object" as const },
+		outputSchema: tool.outputSchema
+			? { ...tool.outputSchema, type: "object" as const }
+			: undefined,
 		annotations: tool.annotations,
 		icons: tool.icons,
+		_meta: tool._meta,
 	}));
 }
 
