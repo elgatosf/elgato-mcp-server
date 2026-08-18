@@ -20,6 +20,7 @@
         "start": "node bin/index.js",
         "http": "node bin/index.js --http",
         "ngrok": "node bin/index.js --http --ngrok",
+        "mcpb": "scripts/pack_mcpb.sh $npm_package_version",
         "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
         "test:unit": "node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPatterns=unit",
         "test:integration": "node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPatterns=integration",
@@ -53,6 +54,7 @@
         "express": "^5.2.1"
     },
     "devDependencies": {
+        "@anthropic-ai/mcpb": "2.1.2",
         "@changesets/cli": "^2.31.1",
         "@elgato/eslint-config": "^0.3.2",
         "@elgato/prettier-config": "^0.3.3",

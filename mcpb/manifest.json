@@ -1,0 +1,108 @@
+{
+  "manifest_version": "0.3",
+  "name": "elgato-mcp-server",
+  "display_name": "Elgato Stream Deck",
+  "version": "0.1.4",
+  "description": "A Model Context Protocol (MCP) server that bridges AI assistants with Elgato apps.",
+  "long_description": "Bridges Claude with Elgato desktop apps over local IPC (Unix socket on macOS, named pipe on Windows). Currently connects to **Stream Deck**, which must be installed and running on the same machine.\n\nTools and resources are discovered dynamically from whichever Elgato apps are running, namespaced by app (for example `streamdeck__...`). The bridge reconnects on its own when an app starts or stops.\n\nThis bundle does not vendor the server. It runs `npx -y @elgato/mcp-server@latest`, which requires Node.js (with npm) to be installed on your machine. The first launch downloads the package (a few seconds, needs internet) and later launches pick up new releases automatically.",
+  "author": {
+    "name": "Elgato",
+    "url": "https://www.elgato.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/elgatosf/elgato-mcp-server.git"
+  },
+  "homepage": "https://www.elgato.com",
+  "documentation": "https://github.com/elgatosf/elgato-mcp-server#readme",
+  "support": "https://github.com/elgatosf/elgato-mcp-server/issues",
+  "icon": "icon.png",
+  "icons": [
+    {
+      "src": "assets/icons/icon-16-light.png",
+      "size": "16x16",
+      "theme": "light"
+    },
+    {
+      "src": "assets/icons/icon-16-dark.png",
+      "size": "16x16",
+      "theme": "dark"
+    },
+    {
+      "src": "assets/icons/icon-32-light.png",
+      "size": "32x32",
+      "theme": "light"
+    },
+    {
+      "src": "assets/icons/icon-32-dark.png",
+      "size": "32x32",
+      "theme": "dark"
+    },
+    {
+      "src": "assets/icons/icon-128-light.png",
+      "size": "128x128",
+      "theme": "light"
+    },
+    {
+      "src": "assets/icons/icon-128-dark.png",
+      "size": "128x128",
+      "theme": "dark"
+    },
+    {
+      "src": "assets/icons/icon-256-light.png",
+      "size": "256x256",
+      "theme": "light"
+    },
+    {
+      "src": "assets/icons/icon-256-dark.png",
+      "size": "256x256",
+      "theme": "dark"
+    },
+    {
+      "src": "assets/icons/icon-512-light.png",
+      "size": "512x512",
+      "theme": "light"
+    },
+    {
+      "src": "assets/icons/icon-512-dark.png",
+      "size": "512x512",
+      "theme": "dark"
+    }
+  ],
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.cjs",
+    "mcp_config": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@elgato/mcp-server@latest"
+      ],
+      "platform_overrides": {
+        "win32": {
+          "command": "npx.cmd"
+        }
+      }
+    }
+  },
+  "tools_generated": true,
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "elgato",
+    "stream-deck",
+    "ai",
+    "claude",
+    "automation"
+  ],
+  "license": "MIT",
+  "compatibility": {
+    "platforms": [
+      "darwin",
+      "win32"
+    ],
+    "runtimes": {
+      "node": ">=18.0.0"
+    }
+  }
+}
