@@ -14,7 +14,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import { ClientManager } from "./ClientManager.js";
-import { SDK_NOTIFICATIONS } from "./constants.js";
+import { BRIDGE_STATUS_TOOL, NO_APPS_CONNECTED_MESSAGE, SDK_NOTIFICATIONS } from "./constants.js";
 import type { ClientManagerConfig, ElicitationParams } from "./types.js";
 import { log } from "./utils.js";
 
@@ -165,6 +165,24 @@ export class McpBridge {
 		}
 	}
 
+	private getBridgeStatus(): CallToolResult {
+		const connected = this.clientManager.connectedClients;
+		if (connected.length === 0) {
+			return {
+				content: [{ type: "text", text: NO_APPS_CONNECTED_MESSAGE }],
+			};
+		}
+		const toolCount = this.clientManager.getTools().length;
+		return {
+			content: [
+				{
+					type: "text",
+					text: `Connected Elgato apps: ${connected.join(", ")}. ${toolCount} app tools available.`,
+				},
+			],
+		};
+	}
+
 	private async handleClientNotification(method: string, params?: unknown): Promise<void> {
 		log.debug(`Received notification from client: ${method}`, params);
 
@@ -216,17 +234,22 @@ export class McpBridge {
 
 		server.setRequestHandler(ListToolsRequestSchema, (): ListToolsResult => {
 			if (!this.clientManager.isConnected) {
-				return { tools: [] };
+				return { tools: [BRIDGE_STATUS_TOOL] };
 			}
-			return { tools: this.clientManager.getTools() };
+			return { tools: [BRIDGE_STATUS_TOOL, ...this.clientManager.getTools()] };
 		});
 
 		server.setRequestHandler(CallToolRequestSchema, async (request, extra): Promise<CallToolResult> => {
 			const { name, arguments: args = {} } = request.params;
 
+			// The status tool is served by the bridge itself so it works with no apps connected.
+			if (name === BRIDGE_STATUS_TOOL.name) {
+				return this.getBridgeStatus();
+			}
+
 			if (!this.clientManager.isConnected) {
 				return {
-					content: [{ type: "text", text: "No apps connected" }],
+					content: [{ type: "text", text: NO_APPS_CONNECTED_MESSAGE }],
 					isError: true,
 				};
 			}
@@ -318,7 +341,7 @@ export class McpBridge {
 			const { uri } = request.params;
 
 			if (!this.clientManager.isConnected) {
-				throw new Error("No apps connected");
+				throw new Error(NO_APPS_CONNECTED_MESSAGE);
 			}
 
 			try {
@@ -343,7 +366,7 @@ export class McpBridge {
 			const { uri } = request.params;
 
 			if (!this.clientManager.isConnected) {
-				throw new Error("No apps connected");
+				throw new Error(NO_APPS_CONNECTED_MESSAGE);
 			}
 
 			try {
@@ -364,7 +387,7 @@ export class McpBridge {
 			const { uri } = request.params;
 
 			if (!this.clientManager.isConnected) {
-				throw new Error("No apps connected");
+				throw new Error(NO_APPS_CONNECTED_MESSAGE);
 			}
 
 			try {

@@ -205,7 +205,7 @@ The bridge implements standard MCP protocol endpoints:
 
 #### tools/list
 
-Returns dynamically discovered tools from Stream Deck.
+Returns the built-in `bridge_status` tool followed by dynamically discovered tools from Stream Deck. `bridge_status` is served by the bridge itself (read-only, no arguments) and is always listed — even when no apps are connected — so MCP clients never see an empty tool list. It reports which Elgato apps are connected and how many of their tools are available.
 
 **Response:**
 
@@ -850,11 +850,13 @@ When no apps are connected:
 return {
   content: [{
     type: "text",
-    text: "No apps connected. Please start the required app and try again."
+    text: NO_APPS_CONNECTED_MESSAGE, // "No Elgato apps connected. Make sure the Stream Deck app is running, or install it from https://www.elgato.com/downloads. ..."
   }],
   isError: true,
 };
 ```
+
+The same message is thrown as a JSON-RPC error by the resource handlers (`resources/read`, `resources/subscribe`, `resources/unsubscribe`) when no apps are connected. The built-in `bridge_status` tool returns this guidance as a successful (non-error) result, since reporting a disconnected state is its purpose.
 
 ---
 

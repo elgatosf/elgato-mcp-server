@@ -98,7 +98,15 @@ Logs are written to stderr with a severity label (`ERROR`, `WARN`, `INFO`, `DEBU
 
 ## Claude Desktop Configuration
 
-Add the following to your Claude Desktop configuration file:
+### Using the Desktop Extension (Recommended)
+
+The easiest way to install is the packaged desktop extension (`.mcpb`), which is fully self-contained and runs on the Node.js runtime included with Claude Desktop — no Node.js, npm, or internet access required:
+
+1. Download the latest `elgato_stream_deck-<version>.mcpb` from the [releases page](https://github.com/elgatosf/elgato-mcp-server/releases).
+2. In Claude Desktop, open **Settings → Extensions** and drag the `.mcpb` file into the window (or double-click the file).
+3. Make sure the Stream Deck app is running — its tools appear automatically once connected. The built-in `bridge_status` tool reports the connection state at any time.
+
+Alternatively, add the server to your Claude Desktop configuration file manually:
 
 **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
@@ -148,6 +156,12 @@ When running in HTTP mode, the following endpoints are available:
 - Elgato app with MCP plugin support (e.g. Stream Deck)
 - Node.js 18 or later
 - Supported platforms: Windows, macOS
+
+## Privacy Policy
+
+This server runs entirely on your machine and communicates only with locally installed Elgato apps over local IPC (Unix sockets on macOS, named pipes on Windows). It does not collect, store, or transmit personal data to external services. Tool inputs and outputs flow between your MCP client (e.g. Claude Desktop) and the connected Elgato app on the same machine; the optional ngrok tunnel is only established when explicitly enabled with `--ngrok`.
+
+For Elgato/Corsair data handling practices, see the [Elgato Privacy Policy](https://www.elgato.com/en/privacy-policy).
 
 ## Contributing
 

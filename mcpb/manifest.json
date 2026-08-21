@@ -79,7 +79,16 @@
       ]
     }
   },
+  "tools": [
+    {
+      "name": "bridge_status",
+      "description": "Reports which Elgato apps (e.g. Stream Deck) are currently connected to the bridge and how many of their tools are available."
+    }
+  ],
   "tools_generated": true,
+  "privacy_policies": [
+    "https://www.elgato.com/en/privacy-policy"
+  ],
   "keywords": [
     "mcp",
     "model-context-protocol",

@@ -30,18 +30,18 @@ src/__tests__/
 │   ├── MockServer.ts                     # Mock implementation of net.Server
 │   ├── MockTransport.ts                  # Mock implementation of MCP Transport
 │   └── testUtils.ts                      # Helper functions for creating test data
-├── unit/                                 # Unit tests (8 test files, 252 tests)
+├── unit/                                 # Unit tests (8 test files, 253 tests)
 │   ├── constants.test.ts                 # Socket path generation tests (14 tests)
 │   ├── utils.test.ts                     # Utility functions tests (53 tests)
 │   ├── IpcClient.test.ts                 # IPC client tests (65 tests, includes elicitation)
 │   ├── ClientManager.test.ts             # Client manager aggregation tests (42 tests)
-│   ├── McpBridge.test.ts                 # MCP bridge logic tests (72 tests, includes elicitation)
+│   ├── McpBridge.test.ts                 # MCP bridge logic tests (56 tests, includes elicitation)
 │   ├── stdio.test.ts                     # stdio transport lifecycle tests (10 tests)
 │   ├── http-server-startup.test.ts       # HTTP server initialization tests (5 tests)
 │   └── http-session-timeout.test.ts      # HTTP session timeout tests (6 tests)
-└── integration/                          # Integration tests (4 test files, 53 tests)
+└── integration/                          # Integration tests (4 test files, 67 tests)
     ├── transports.test.ts                # Stdio and HTTP transport tests
-    ├── mcp-protocol.test.ts              # MCP protocol endpoint tests (49 tests)
+    ├── mcp-protocol.test.ts              # MCP protocol endpoint tests (31 tests)
     ├── http-cors.test.ts                 # CORS handling tests
     └── http-session-lifecycle.test.ts    # Session lifecycle tests
 ```
@@ -106,7 +106,7 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Handling connected/disconnected client states
 - URI prefixing in RESOURCES_UPDATED notifications for subscription matching
 
-#### McpBridge.test.ts (72 tests)
+#### McpBridge.test.ts (56 tests)
 
 - Initialization (connected and disconnected modes)
 - Server creation with custom info
@@ -157,10 +157,10 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Reconnection handling
 - Callback notifications on reconnection
 
-#### mcp-protocol.test.ts (49 tests)
+#### mcp-protocol.test.ts (31 tests)
 
-- tools/list endpoint (cached tools, empty tools, refresh)
-- tools/call endpoint (success, errors, disconnected state)
+- tools/list endpoint (cached tools, built-in bridge_status tool, refresh)
+- tools/call endpoint (success, errors, disconnected state, bridge_status when connected/disconnected)
 - Tool not found error
 - Notifications on reconnection
 - Multiple notification callbacks
