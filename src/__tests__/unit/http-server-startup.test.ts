@@ -60,9 +60,17 @@ describe("HTTP server startup error handling", () => {
 		processOnSpy.mockRestore();
 	});
 
-	const setupModule = async (): Promise<typeof import("../../transports/http.js")> => {
+	const setupModule = async (options?: {
+		ngrokModuleError?: Error;
+	}): Promise<typeof import("../../transports/http.js")> => {
 		jest.resetModules();
 		logMock.mockClear();
+
+		if (options?.ngrokModuleError) {
+			jest.unstable_mockModule("@ngrok/ngrok", () => {
+				throw options.ngrokModuleError;
+			});
+		}
 
 		jest.unstable_mockModule("../../utils.js", () => ({
 			log: {
@@ -156,6 +164,34 @@ describe("HTTP server startup error handling", () => {
 			expect(mockServer.on).toHaveBeenCalledWith("error", expect.any(Function));
 			expect(typeof mockServer.close).toBe("function");
 			expect(mockServer.close).not.toHaveBeenCalled();
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"should start the server when --ngrok is set but @ngrok/ngrok cannot be loaded",
+		async () => {
+			const { mockApp, mockServer } = createStartupHarness();
+			(mockApp.listen as unknown as jest.Mock).mockImplementation((...args: unknown[]) => {
+				const callback = args[1] as (() => void) | undefined;
+				callback?.();
+				return mockServer;
+			});
+			// Successful startup schedules the idle-session cleanup interval; stub it so Jest can exit.
+			const setIntervalSpy = jest
+				.spyOn(global, "setInterval")
+				.mockReturnValue(0 as unknown as ReturnType<typeof setInterval>);
+
+			try {
+				const httpModule = await setupModule({ ngrokModuleError: new Error("Cannot find module '@ngrok/ngrok'") });
+				const startPromise = httpModule.startHttpTransport({ port: 4567, ngrok: true });
+
+				await expect(startPromise).resolves.toBeUndefined();
+				expect(logMock).toHaveBeenCalledWith("Failed to start ngrok tunnel:", expect.any(Error));
+				expect((mockApp as unknown as { listen: jest.Mock }).listen).toHaveBeenCalledWith(4567, expect.any(Function));
+			} finally {
+				setIntervalSpy.mockRestore();
+			}
 		},
 		TEST_TIMEOUT_MS,
 	);

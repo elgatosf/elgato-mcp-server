@@ -38,13 +38,29 @@ STAGE_DIR="$(mktemp -d)"
 trap 'rm -rf "$STAGE_DIR"' EXIT
 cp -R "$BUNDLE_DIR/" "$STAGE_DIR/"
 
+# Typecheck gate (esbuild does not typecheck).
+echo "Typechecking"
+"$ROOT_DIR/node_modules/.bin/tsc" -p "$ROOT_DIR/tsconfig.json"
+
+echo "Bundling server"
+node "$ROOT_DIR/scripts/bundle_mcpb.mjs" "$STAGE_DIR/server/index.cjs"
+
+# Runtime files resolved relative to the bundle (see src/constants.ts).
+cp "$ROOT_DIR/assets/elgato.svg" "$ROOT_DIR/assets/elgato_white.svg" "$STAGE_DIR/assets/"
+
 echo "Setting bundle version to $VERSION"
-VERSION="$VERSION" MANIFEST="$STAGE_DIR/manifest.json" node -e '
+VERSION="$VERSION" STAGE_DIR="$STAGE_DIR" node -e '
 const fs = require("fs");
-const path = process.env.MANIFEST;
-const manifest = JSON.parse(fs.readFileSync(path, "utf8"));
+const manifestPath = process.env.STAGE_DIR + "/manifest.json";
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 manifest.version = process.env.VERSION;
-fs.writeFileSync(path, JSON.stringify(manifest, null, 2) + "\n");
+fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+
+// Minimal package.json so the bundle can resolve its version at runtime.
+fs.writeFileSync(
+	process.env.STAGE_DIR + "/package.json",
+	JSON.stringify({ name: "@elgato/mcp-server", version: process.env.VERSION, private: true }, null, 2) + "\n",
+);
 '
 
 mkdir -p "$ROOT_DIR/dist"

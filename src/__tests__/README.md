@@ -37,7 +37,7 @@ src/__tests__/
 │   ├── ClientManager.test.ts             # Client manager aggregation tests (42 tests)
 │   ├── McpBridge.test.ts                 # MCP bridge logic tests (72 tests, includes elicitation)
 │   ├── stdio.test.ts                     # stdio transport lifecycle tests (10 tests)
-│   ├── http-server-startup.test.ts       # HTTP server initialization tests (4 tests)
+│   ├── http-server-startup.test.ts       # HTTP server initialization tests (5 tests)
 │   └── http-session-timeout.test.ts      # HTTP session timeout tests (6 tests)
 └── integration/                          # Integration tests (4 test files, 53 tests)
     ├── transports.test.ts                # Stdio and HTTP transport tests
@@ -119,12 +119,13 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Helper functions (createInitializedBridge, createConnectedBridge)
 - Elicitation forwarding (callback registration, decline when no active server)
 
-#### http-server-startup.test.ts (4 tests)
+#### http-server-startup.test.ts (5 tests)
 
 - EADDRINUSE error handling
 - EACCES error handling
 - EADDRNOTAVAIL error handling
 - Generic error handling
+- Graceful startup when `@ngrok/ngrok` cannot be loaded
 
 #### http-session-timeout.test.ts (6 tests)
 

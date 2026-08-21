@@ -222,8 +222,8 @@ export async function startHttpTransport(options: HttpTransportOptions = {}): Pr
 
 	// Start ngrok first if enabled to get the URL for CORS
 	if (options.ngrok) {
-		const ngrok = await import("@ngrok/ngrok");
 		try {
+			const ngrok = await import("@ngrok/ngrok");
 			const listener = await ngrok.forward({
 				addr: port,
 				authtoken_from_env: true,
@@ -235,7 +235,7 @@ export async function startHttpTransport(options: HttpTransportOptions = {}): Pr
 			}
 		} catch (error) {
 			log.error("Failed to start ngrok tunnel:", error);
-			log.error("Make sure NGROK_AUTHTOKEN is set");
+			log.error("Make sure NGROK_AUTHTOKEN is set and @ngrok/ngrok is available");
 		}
 	}
 
