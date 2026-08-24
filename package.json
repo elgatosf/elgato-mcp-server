@@ -1,6 +1,6 @@
 {
     "name": "@elgato/mcp-server",
-    "version": "0.1.4",
+    "version": "0.1.5",
     "description": "A Model Context Protocol (MCP) server that bridges AI assistants with Elgato apps.",
     "type": "module",
     "bin": {
@@ -20,6 +20,8 @@
         "start": "node bin/index.js",
         "http": "node bin/index.js --http",
         "ngrok": "node bin/index.js --http --ngrok",
+        "mcpb": "scripts/pack_mcpb.sh $npm_package_version",
+        "bundle:mcpb": "node scripts/bundle_mcpb.mjs",
         "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
         "test:unit": "node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPatterns=unit",
         "test:integration": "node --experimental-vm-modules node_modules/jest/bin/jest.js --testPathPatterns=integration",
@@ -41,7 +43,7 @@
     },
     "homepage": "https://github.com/elgatosf/elgato-mcp-server#readme",
     "license": "MIT",
-    "packageManager": "pnpm@10.28.2",
+    "packageManager": "pnpm@11.23.0",
     "prettier": "@elgato/prettier-config",
     "engines": {
         "node": ">=18.0.0"
@@ -53,6 +55,7 @@
         "express": "^5.2.1"
     },
     "devDependencies": {
+        "@anthropic-ai/mcpb": "2.1.2",
         "@changesets/cli": "^2.31.1",
         "@elgato/eslint-config": "^0.3.2",
         "@elgato/prettier-config": "^0.3.3",
@@ -61,6 +64,7 @@
         "@types/express": "^5.0.6",
         "@types/jest": "^30.0.0",
         "@types/node": "^25.9.5",
+        "esbuild": "0.28.2",
         "eslint": "^9.39.5",
         "jest": "^30.4.2",
         "prettier": "3.9.6",

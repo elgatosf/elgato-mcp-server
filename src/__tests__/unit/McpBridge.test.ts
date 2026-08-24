@@ -781,11 +781,13 @@ describe("McpBridge", () => {
 			});
 
 			const response = await transport.waitForOutgoingMessage();
-			expect((response as any).result.tools).toHaveLength(2);
-			expect((response as any).result.tools[0].name).toBe("tool1");
+			// bridge_status is always listed first, followed by app tools
+			expect((response as any).result.tools).toHaveLength(3);
+			expect((response as any).result.tools[0].name).toBe("bridge_status");
+			expect((response as any).result.tools[1].name).toBe("tool1");
 		});
 
-		it("should handle tools/list request when disconnected — returns empty list", async () => {
+		it("should handle tools/list request when disconnected — returns only bridge_status", async () => {
 			(mockClientManager as any).isConnected = false;
 
 			const server = bridge.createServer();
@@ -800,7 +802,8 @@ describe("McpBridge", () => {
 			});
 
 			const response = await transport.waitForOutgoingMessage();
-			expect((response as any).result.tools).toEqual([]);
+			expect((response as any).result.tools).toHaveLength(1);
+			expect((response as any).result.tools[0].name).toBe("bridge_status");
 		});
 
 		it("should handle tools/call when connected", async () => {
@@ -928,7 +931,7 @@ describe("McpBridge", () => {
 
 			const response = await transport.waitForOutgoingMessage();
 			expect((response as any).result.isError).toBe(true);
-			expect((response as any).result.content[0].text).toContain("No apps connected");
+			expect((response as any).result.content[0].text).toContain("No Elgato apps connected");
 		});
 
 		it("should handle resources/list when connected", async () => {
@@ -1012,7 +1015,7 @@ describe("McpBridge", () => {
 
 			const response = await transport.waitForOutgoingMessage();
 			expect((response as any).error).toBeDefined();
-			expect((response as any).error.message).toContain("No apps connected");
+			expect((response as any).error.message).toContain("No Elgato apps connected");
 		});
 
 		it("should throw error on resources/subscribe when disconnected", async () => {
@@ -1031,7 +1034,7 @@ describe("McpBridge", () => {
 
 			const response = await transport.waitForOutgoingMessage();
 			expect((response as any).error).toBeDefined();
-			expect((response as any).error.message).toContain("No apps connected");
+			expect((response as any).error.message).toContain("No Elgato apps connected");
 		});
 
 		it("should throw error on resources/unsubscribe when disconnected", async () => {
@@ -1050,7 +1053,7 @@ describe("McpBridge", () => {
 
 			const response = await transport.waitForOutgoingMessage();
 			expect((response as any).error).toBeDefined();
-			expect((response as any).error.message).toContain("No apps connected");
+			expect((response as any).error.message).toContain("No Elgato apps connected");
 		});
 
 		it("should return error response when callTool returns error", async () => {

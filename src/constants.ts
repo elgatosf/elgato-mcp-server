@@ -1,7 +1,8 @@
+import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
 
 import type { AppDefinition, ServerInfo } from "./types.js";
 
@@ -87,6 +88,24 @@ export const DEFAULT_SERVER_INFO: ServerInfo = {
 
 /** Log message prefix. */
 export const LOG_PREFIX = "[MCP Bridge]";
+
+/** Guidance returned when no Elgato app is reachable over IPC. */
+export const NO_APPS_CONNECTED_MESSAGE =
+	"No Elgato apps connected. Make sure the Stream Deck app is running, or install it from https://www.elgato.com/downloads. App tools appear automatically once the app is running.";
+
+/** Built-in tool reporting bridge connectivity. Always listed, even when no apps are connected. */
+export const BRIDGE_STATUS_TOOL: Tool = {
+	name: "bridge_status",
+	title: "Elgato Bridge Status",
+	description:
+		"Reports which Elgato apps (e.g. Stream Deck) are currently connected to the bridge and how many of their tools are available. Use this to check whether the Stream Deck app is reachable when expected tools are missing.",
+	inputSchema: { type: "object", properties: {}, additionalProperties: false },
+	annotations: {
+		title: "Elgato Bridge Status",
+		readOnlyHint: true,
+		openWorldHint: false,
+	},
+};
 
 /** MCP error codes. */
 export const MCP_ERROR_CODES = {

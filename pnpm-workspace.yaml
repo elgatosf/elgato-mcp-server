@@ -1,0 +1,5 @@
+allowBuilds:
+  # Both ship prebuilt platform binaries via optionalDependencies;
+  # their postinstall scripts are fallback-only and not needed.
+  esbuild: false
+  unrs-resolver: false

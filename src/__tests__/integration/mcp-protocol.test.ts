@@ -41,24 +41,11 @@ describe("MCP Protocol Integration Tests", () => {
 			const response = await transport.waitForOutgoingMessage();
 
 			expect(response).toHaveProperty("result");
-			expect((response as any).result.tools).toHaveLength(2);
+			// bridge_status plus the two app tools
+			expect((response as any).result.tools).toHaveLength(3);
 		});
 
-		it("should return empty tools when disconnected", async () => {
-			mockClientManager = createMockClientManager({ isConnected: false });
-			bridge = new McpBridge(mockClientManager);
-
-			const server = bridge.createServer();
-			const transport = new MockTransport();
-			await server.connect(transport);
-
-			transport.simulateIncomingMessage({ jsonrpc: "2.0" as const, id: 1, method: "tools/list", params: {} });
-			const response = await transport.waitForOutgoingMessage();
-
-			expect((response as any).result.tools).toEqual([]);
-		});
-
-		it("should return empty tools when disconnected even if getTools would return data", async () => {
+		it("should not expose app tools when disconnected even if getTools would return data", async () => {
 			const tools = [createMockTool({ name: "cached_tool_1" }), createMockTool({ name: "cached_tool_2" })];
 			mockClientManager = createMockClientManager({ isConnected: false });
 			mockClientManager.getTools.mockReturnValue(tools as any);
@@ -72,9 +59,28 @@ describe("MCP Protocol Integration Tests", () => {
 			transport.simulateIncomingMessage({ jsonrpc: "2.0" as const, id: 1, method: "tools/list", params: {} });
 			const response = await transport.waitForOutgoingMessage();
 
-			expect((response as any).result.tools).toEqual([]);
+			expect((response as any).result.tools).toHaveLength(1);
+			expect((response as any).result.tools[0].name).toBe("bridge_status");
 			// getTools should NOT be called when disconnected
 			expect(mockClientManager.getTools).not.toHaveBeenCalled();
+		});
+
+		it("should always include the built-in bridge_status tool, even when disconnected", async () => {
+			mockClientManager = createMockClientManager({ isConnected: false });
+			bridge = new McpBridge(mockClientManager);
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({ jsonrpc: "2.0" as const, id: 1, method: "tools/list", params: {} });
+			const response = await transport.waitForOutgoingMessage();
+
+			const tools = (response as any).result.tools;
+			expect(tools).toHaveLength(1);
+			expect(tools[0].name).toBe("bridge_status");
+			expect(tools[0].title).toBeDefined();
+			expect(tools[0].annotations.readOnlyHint).toBe(true);
 		});
 
 		it("should call clientManager.getTools() on each request when connected", async () => {
@@ -170,7 +176,7 @@ describe("MCP Protocol Integration Tests", () => {
 			expect((response as any).result.isError).toBe(true);
 		});
 
-		it("should return error when apps are disconnected", async () => {
+		it("should return an actionable error when apps are disconnected", async () => {
 			(mockClientManager as any).isConnected = false;
 
 			const server = bridge.createServer();
@@ -186,7 +192,50 @@ describe("MCP Protocol Integration Tests", () => {
 
 			const response = await transport.waitForOutgoingMessage();
 			expect((response as any).result.isError).toBe(true);
-			expect((response as any).result.content[0].text).toContain("No apps connected");
+			expect((response as any).result.content[0].text).toContain("Stream Deck app is running");
+			expect((response as any).result.content[0].text).toContain("elgato.com/downloads");
+		});
+
+		it("should answer bridge_status successfully when disconnected, with remediation guidance", async () => {
+			(mockClientManager as any).isConnected = false;
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: { name: "bridge_status", arguments: {} },
+			});
+
+			const response = await transport.waitForOutgoingMessage();
+			expect((response as any).result.isError).toBeUndefined();
+			expect((response as any).result.content[0].text).toContain("Stream Deck app is running");
+			expect((response as any).result.content[0].text).toContain("elgato.com/downloads");
+			expect(mockClientManager.callTool).not.toHaveBeenCalled();
+		});
+
+		it("should answer bridge_status with connected app names when connected", async () => {
+			(mockClientManager as any).connectedClients = ["streamdeck"];
+			mockClientManager.getTools.mockReturnValue([createMockTool({ name: "streamdeck__tool1" })] as any);
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: { name: "bridge_status", arguments: {} },
+			});
+
+			const response = await transport.waitForOutgoingMessage();
+			expect((response as any).result.isError).toBeUndefined();
+			expect((response as any).result.content[0].text).toContain("streamdeck");
+			expect(mockClientManager.callTool).not.toHaveBeenCalled();
 		});
 
 		it("should call tools/call handler and return success result via MockTransport", async () => {
@@ -225,7 +274,7 @@ describe("MCP Protocol Integration Tests", () => {
 
 			const response = await transport.waitForOutgoingMessage();
 			expect((response as any).result.isError).toBe(true);
-			expect((response as any).result.content[0].text).toContain("No apps connected");
+			expect((response as any).result.content[0].text).toContain("No Elgato apps connected");
 		});
 
 		it("should handle tool returning error response via MockTransport", async () => {
@@ -386,7 +435,7 @@ describe("MCP Protocol Integration Tests", () => {
 			const response = await transport.waitForOutgoingMessage();
 
 			expect(response).toHaveProperty("error");
-			expect((response as any).error.message).toContain("No apps connected");
+			expect((response as any).error.message).toContain("No Elgato apps connected");
 		});
 
 		it("should handle read resource exception via MockTransport", async () => {
@@ -447,7 +496,7 @@ describe("MCP Protocol Integration Tests", () => {
 			const response = await transport.waitForOutgoingMessage();
 
 			expect(response).toHaveProperty("error");
-			expect((response as any).error.message).toContain("No apps connected");
+			expect((response as any).error.message).toContain("No Elgato apps connected");
 		});
 	});
 
@@ -499,7 +548,7 @@ describe("MCP Protocol Integration Tests", () => {
 			const response = await transport.waitForOutgoingMessage();
 
 			expect(response).toHaveProperty("error");
-			expect((response as any).error.message).toContain("No apps connected");
+			expect((response as any).error.message).toContain("No Elgato apps connected");
 		});
 	});
 

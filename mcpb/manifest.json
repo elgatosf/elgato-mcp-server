@@ -1,0 +1,111 @@
+{
+  "manifest_version": "0.3",
+  "name": "elgato-mcp-server",
+  "display_name": "Elgato Stream Deck",
+  "version": "0.1.5",
+  "description": "A Model Context Protocol (MCP) server that bridges AI assistants with Elgato apps.",
+  "long_description": "Bridges your chat agent with Elgato desktop apps over local IPC (Unix socket on macOS, named pipe on Windows). Currently connects to **Stream Deck**, which must be installed and running on the same machine.\n\nTools and resources are discovered dynamically from whichever Elgato apps are running, namespaced by app (for example `streamdeck__...`). The bridge reconnects on its own when an app starts or stops.\n\nThis bundle is self-contained: the MCP server ships inside it and runs on the Node.js runtime included with Claude Desktop. No Node.js, npm, or internet access is required to install or launch it.",
+  "author": {
+    "name": "Elgato",
+    "url": "https://www.elgato.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/elgatosf/elgato-mcp-server.git"
+  },
+  "homepage": "https://www.elgato.com",
+  "documentation": "https://github.com/elgatosf/elgato-mcp-server#readme",
+  "support": "https://github.com/elgatosf/elgato-mcp-server/issues",
+  "icon": "icon.png",
+  "icons": [
+    {
+      "src": "assets/icons/icon-16-light.png",
+      "size": "16x16",
+      "theme": "light"
+    },
+    {
+      "src": "assets/icons/icon-16-dark.png",
+      "size": "16x16",
+      "theme": "dark"
+    },
+    {
+      "src": "assets/icons/icon-32-light.png",
+      "size": "32x32",
+      "theme": "light"
+    },
+    {
+      "src": "assets/icons/icon-32-dark.png",
+      "size": "32x32",
+      "theme": "dark"
+    },
+    {
+      "src": "assets/icons/icon-128-light.png",
+      "size": "128x128",
+      "theme": "light"
+    },
+    {
+      "src": "assets/icons/icon-128-dark.png",
+      "size": "128x128",
+      "theme": "dark"
+    },
+    {
+      "src": "assets/icons/icon-256-light.png",
+      "size": "256x256",
+      "theme": "light"
+    },
+    {
+      "src": "assets/icons/icon-256-dark.png",
+      "size": "256x256",
+      "theme": "dark"
+    },
+    {
+      "src": "assets/icons/icon-512-light.png",
+      "size": "512x512",
+      "theme": "light"
+    },
+    {
+      "src": "assets/icons/icon-512-dark.png",
+      "size": "512x512",
+      "theme": "dark"
+    }
+  ],
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.cjs",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/server/index.cjs"
+      ]
+    }
+  },
+  "tools": [
+    {
+      "name": "bridge_status",
+      "description": "Reports which Elgato apps (e.g. Stream Deck) are currently connected to the bridge and how many of their tools are available."
+    }
+  ],
+  "tools_generated": true,
+  "privacy_policies": [
+    "https://www.elgato.com/en/privacy-policy"
+  ],
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "elgato",
+    "stream-deck",
+    "ai",
+    "claude",
+    "automation"
+  ],
+  "license": "MIT",
+  "compatibility": {
+    "platforms": [
+      "darwin",
+      "win32"
+    ],
+    "runtimes": {
+      "node": ">=18.0.0"
+    }
+  }
+}

@@ -54,3 +54,29 @@ jobs:
 
       - name: "🏷️ Push tags"
         run: git push --tags
+
+      # `changeset publish` creates the v<version> tag only when it actually
+      # publishes; the checkout fetches no tags, so its presence means a new
+      # version was released on this run.
+      - name: "🔍 Detect published version"
+        id: release
+        run: |
+          VERSION="$(node -p 'require("./package.json").version')"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ -n "$(git tag --list "v$VERSION")" ]]; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: "📦 Pack MCPB bundle"
+        if: steps.release.outputs.published == 'true'
+        run: pnpm mcpb
+
+      - name: "🚀 Create GitHub release"
+        if: steps.release.outputs.published == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.release.outputs.version }}" \
+            dist/elgato_stream_deck-*.mcpb \
+            --title "v${{ steps.release.outputs.version }}" \
+            --generate-notes

@@ -38,3 +38,6 @@ jobs:
 
       - name: "✅ Test"
         run: pnpm test
+
+      - name: "📦 Pack MCPB bundle"
+        run: pnpm mcpb
