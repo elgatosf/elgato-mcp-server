@@ -43,7 +43,7 @@
     },
     "homepage": "https://github.com/elgatosf/elgato-mcp-server#readme",
     "license": "MIT",
-    "packageManager": "pnpm@10.28.2",
+    "packageManager": "pnpm@11.23.0",
     "prettier": "@elgato/prettier-config",
     "engines": {
         "node": ">=18.0.0"
