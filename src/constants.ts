@@ -99,7 +99,7 @@ export const BRIDGE_STATUS_TOOL: Tool = {
 	title: "Elgato Bridge Status",
 	description:
 		"Reports which Elgato apps (e.g. Stream Deck) are currently connected to the bridge and how many of their tools are available. Use this to check whether the Stream Deck app is reachable when expected tools are missing.",
-	inputSchema: { type: "object", properties: {} },
+	inputSchema: { type: "object", properties: {}, additionalProperties: false },
 	annotations: {
 		title: "Elgato Bridge Status",
 		readOnlyHint: true,

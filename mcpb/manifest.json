@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "elgato-mcp-server",
   "display_name": "Elgato Stream Deck",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "A Model Context Protocol (MCP) server that bridges AI assistants with Elgato apps.",
   "long_description": "Bridges Claude with Elgato desktop apps over local IPC (Unix socket on macOS, named pipe on Windows). Currently connects to **Stream Deck**, which must be installed and running on the same machine.\n\nTools and resources are discovered dynamically from whichever Elgato apps are running, namespaced by app (for example `streamdeck__...`). The bridge reconnects on its own when an app starts or stops.\n\nThis bundle is self-contained: the MCP server ships inside it and runs on the Node.js runtime included with Claude Desktop. No Node.js, npm, or internet access is required to install or launch it.",
   "author": {
