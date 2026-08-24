@@ -36,7 +36,9 @@ fi
 # Stage the bundle so the tracked manifest is never modified.
 STAGE_DIR="$(mktemp -d)"
 trap 'rm -rf "$STAGE_DIR"' EXIT
-cp -R "$BUNDLE_DIR/" "$STAGE_DIR/"
+# "/." source form copies directory contents on both GNU (Linux) and BSD (macOS) cp;
+# a trailing slash alone is contents-copy on BSD but whole-directory-copy on GNU.
+cp -R "$BUNDLE_DIR/." "$STAGE_DIR/"
 
 # Typecheck gate (esbuild does not typecheck).
 echo "Typechecking"
