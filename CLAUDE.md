@@ -21,12 +21,12 @@ pnpm test:watch         # Watch mode
 
 **Run a single test file:**
 ```bash
-npx vitest run src/__tests__/unit/McpBridge.test.ts
+pnx vitest run src/__tests__/unit/McpBridge.test.ts
 ```
 
 **Run a single test by name:**
 ```bash
-npx vitest run -t "test name pattern"
+pnx vitest run -t "test name pattern"
 ```
 
 ## Architecture
