@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, jest } from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Mocked } from "vitest";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import type { ClientManager } from "../../ClientManager.js";
@@ -15,10 +16,10 @@ import {
 
 describe("MCP Protocol Integration Tests", () => {
 	let bridge: McpBridge;
-	let mockClientManager: jest.Mocked<ClientManager>;
+	let mockClientManager: Mocked<ClientManager>;
 
 	beforeEach(() => {
-		jest.clearAllMocks();
+		vi.clearAllMocks();
 		mockClientManager = createMockClientManager({ isConnected: true });
 	});
 
@@ -555,7 +556,7 @@ describe("MCP Protocol Integration Tests", () => {
 	describe("notifications", () => {
 		it("should send tool list changed notification when clientManager fires onToolsChanged", async () => {
 			bridge = new McpBridge(mockClientManager);
-			const notificationCallback = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const notificationCallback = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 			bridge.onToolsChanged(notificationCallback);
 
 			// Simulate clientManager firing onToolsChanged
@@ -571,9 +572,9 @@ describe("MCP Protocol Integration Tests", () => {
 		it("should handle multiple notification callbacks", async () => {
 			bridge = new McpBridge(mockClientManager);
 
-			const callback1 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
-			const callback2 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
-			const callback3 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const callback1 = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const callback2 = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const callback3 = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 
 			bridge.onToolsChanged(callback1);
 			bridge.onToolsChanged(callback2);
@@ -647,7 +648,7 @@ describe("MCP Protocol Integration Tests", () => {
 
 		it("should update tool list when clientManager fires onToolsChanged", async () => {
 			bridge = new McpBridge(mockClientManager);
-			const callback = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const callback = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 			bridge.onToolsChanged(callback);
 
 			const updatedTools = [createMockTool({ name: "tool1" }), createMockTool({ name: "tool2" })];

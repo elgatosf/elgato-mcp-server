@@ -1,4 +1,5 @@
-import { jest } from "@jest/globals";
+import { vi } from "vitest";
+import type { Mock, Mocked } from "vitest";
 
 import type { ClientManager } from "../../ClientManager.js";
 import type { IpcClient } from "../../IpcClient.js";
@@ -128,39 +129,39 @@ export function createMockClientManager(
 	overrides: Partial<{
 		isConnected: boolean;
 		connectedClients: string[];
-		initialize: jest.Mock;
-		close: jest.Mock;
-		getTools: jest.Mock;
-		getResources: jest.Mock;
-		getServerInfo: jest.Mock;
-		callTool: jest.Mock;
-		readResource: jest.Mock;
-		onToolsChanged: jest.Mock;
-		onResourcesChanged: jest.Mock;
-		onNotification: jest.Mock;
-		onElicitation: jest.Mock;
-		onClientConnected: jest.Mock;
-		onClientDisconnected: jest.Mock;
+		initialize: Mock;
+		close: Mock;
+		getTools: Mock;
+		getResources: Mock;
+		getServerInfo: Mock;
+		callTool: Mock;
+		readResource: Mock;
+		onToolsChanged: Mock;
+		onResourcesChanged: Mock;
+		onNotification: Mock;
+		onElicitation: Mock;
+		onClientConnected: Mock;
+		onClientDisconnected: Mock;
 	}> = {},
-): jest.Mocked<ClientManager> {
+): Mocked<ClientManager> {
 	return {
 		isConnected: false,
 		connectedClients: [],
-		initialize: jest.fn(),
-		close: jest.fn(),
-		getTools: jest.fn().mockReturnValue([]),
-		getResources: jest.fn().mockReturnValue([]),
-		getServerInfo: jest.fn().mockReturnValue({ name: "Elgato MCP Server", version: "1.0.0" }),
-		callTool: jest.fn(),
-		readResource: jest.fn(),
-		onToolsChanged: jest.fn(),
-		onResourcesChanged: jest.fn(),
-		onNotification: jest.fn(),
-		onElicitation: jest.fn(),
-		onClientConnected: jest.fn(),
-		onClientDisconnected: jest.fn(),
+		initialize: vi.fn(),
+		close: vi.fn(),
+		getTools: vi.fn().mockReturnValue([]),
+		getResources: vi.fn().mockReturnValue([]),
+		getServerInfo: vi.fn().mockReturnValue({ name: "Elgato MCP Server", version: "1.0.0" }),
+		callTool: vi.fn(),
+		readResource: vi.fn(),
+		onToolsChanged: vi.fn(),
+		onResourcesChanged: vi.fn(),
+		onNotification: vi.fn(),
+		onElicitation: vi.fn(),
+		onClientConnected: vi.fn(),
+		onClientDisconnected: vi.fn(),
 		...overrides,
-	} as unknown as jest.Mocked<ClientManager>;
+	} as unknown as Mocked<ClientManager>;
 }
 
 /**
@@ -170,36 +171,36 @@ export function createMockClientManager(
 export function createMockClient(
 	overrides: Partial<{
 		isConnected: boolean;
-		connect: jest.Mock;
-		disconnect: jest.Mock;
-		getServerInfo: jest.Mock;
-		getTools: jest.Mock;
-		getResources: jest.Mock;
-		readResource: jest.Mock;
-		callTool: jest.Mock;
-		onConnected: jest.Mock;
-		onDisconnected: jest.Mock;
-		onNotification: jest.Mock;
-		onElicitation: jest.Mock;
-		startSignalListener: jest.Mock;
+		connect: Mock;
+		disconnect: Mock;
+		getServerInfo: Mock;
+		getTools: Mock;
+		getResources: Mock;
+		readResource: Mock;
+		callTool: Mock;
+		onConnected: Mock;
+		onDisconnected: Mock;
+		onNotification: Mock;
+		onElicitation: Mock;
+		startSignalListener: Mock;
 	}> = {},
-): jest.Mocked<IpcClient> {
+): Mocked<IpcClient> {
 	return {
 		isConnected: false,
-		connect: jest.fn(),
-		disconnect: jest.fn(),
-		getServerInfo: jest.fn(),
-		getTools: jest.fn(),
-		getResources: jest.fn(),
-		readResource: jest.fn(),
-		callTool: jest.fn(),
-		onConnected: jest.fn(),
-		onDisconnected: jest.fn(),
-		onNotification: jest.fn(),
-		onElicitation: jest.fn(),
-		startSignalListener: jest.fn(),
+		connect: vi.fn(),
+		disconnect: vi.fn(),
+		getServerInfo: vi.fn(),
+		getTools: vi.fn(),
+		getResources: vi.fn(),
+		readResource: vi.fn(),
+		callTool: vi.fn(),
+		onConnected: vi.fn(),
+		onDisconnected: vi.fn(),
+		onNotification: vi.fn(),
+		onElicitation: vi.fn(),
+		startSignalListener: vi.fn(),
 		...overrides,
-	} as unknown as jest.Mocked<IpcClient>;
+	} as unknown as Mocked<IpcClient>;
 }
 
 /**
@@ -209,24 +210,24 @@ export function createMockClient(
 export function createMockBridge(
 	overrides: Partial<{
 		isConnected: boolean;
-		initialize: jest.Mock;
-		close: jest.Mock;
-		createServer: jest.Mock;
-		disposeServer: jest.Mock;
-		onToolsChanged: jest.Mock;
-		onResourcesChanged: jest.Mock;
-		onClientNotification: jest.Mock;
+		initialize: Mock;
+		close: Mock;
+		createServer: Mock;
+		disposeServer: Mock;
+		onToolsChanged: Mock;
+		onResourcesChanged: Mock;
+		onClientNotification: Mock;
 	}> = {},
-): jest.Mocked<McpBridge> {
+): Mocked<McpBridge> {
 	return {
 		isConnected: false,
-		initialize: jest.fn(),
-		close: jest.fn(),
-		createServer: jest.fn(),
-		disposeServer: jest.fn(),
-		onToolsChanged: jest.fn(),
-		onResourcesChanged: jest.fn(),
-		onClientNotification: jest.fn(),
+		initialize: vi.fn(),
+		close: vi.fn(),
+		createServer: vi.fn(),
+		disposeServer: vi.fn(),
+		onToolsChanged: vi.fn(),
+		onResourcesChanged: vi.fn(),
+		onClientNotification: vi.fn(),
 		...overrides,
-	} as unknown as jest.Mocked<McpBridge>;
+	} as unknown as Mocked<McpBridge>;
 }

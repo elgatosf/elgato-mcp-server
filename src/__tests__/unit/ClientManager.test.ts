@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ClientManager } from "../../ClientManager.js";
 import type { IpcClientFactory } from "../../ClientManager.js";
@@ -525,7 +525,7 @@ describe("ClientManager", () => {
 			const mgr = new ClientManager(config, () => mockClient as any);
 			await mgr.initialize();
 
-			const toolsChangedCb = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const toolsChangedCb = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 			mgr.onToolsChanged(toolsChangedCb);
 
 			// Simulate client connecting
@@ -552,7 +552,7 @@ describe("ClientManager", () => {
 			const mgr = new ClientManager(config, () => mockClient as any);
 			await mgr.initialize();
 
-			const resourcesChangedCb = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const resourcesChangedCb = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 			mgr.onResourcesChanged(resourcesChangedCb);
 
 			// Simulate client disconnecting
@@ -574,7 +574,7 @@ describe("ClientManager", () => {
 			const config: ClientManagerConfig = { apps: [{ name: "app", socketBaseName: "app" }] };
 			const mgr = new ClientManager(config, () => mockClient as any);
 
-			const notifyCb = jest.fn();
+			const notifyCb = vi.fn();
 			mgr.onNotification(notifyCb);
 
 			(notificationCallback as any)?.("some/notification", { data: 42 });
@@ -596,7 +596,7 @@ describe("ClientManager", () => {
 			const config: ClientManagerConfig = { apps: [{ name: "app", socketBaseName: "app" }] };
 			const mgr = new ClientManager(config, () => mockClient as any);
 
-			const notifyCb = jest.fn();
+			const notifyCb = vi.fn();
 			mgr.onNotification(notifyCb);
 
 			await (notificationCallback as any)?.(SDK_NOTIFICATIONS.TOOLS_LIST_CHANGED, undefined);
@@ -618,7 +618,7 @@ describe("ClientManager", () => {
 			const config: ClientManagerConfig = { apps: [{ name: "app", socketBaseName: "app" }] };
 			const mgr = new ClientManager(config, () => mockClient as any);
 
-			const notifyCb = jest.fn();
+			const notifyCb = vi.fn();
 			mgr.onNotification(notifyCb);
 
 			await (notificationCallback as any)?.(SDK_NOTIFICATIONS.RESOURCES_LIST_CHANGED, undefined);
@@ -644,7 +644,7 @@ describe("ClientManager", () => {
 			// Clear call count from initialize
 			mockClient.getTools.mockClear();
 
-			const toolsChangedCb = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const toolsChangedCb = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 			mgr.onToolsChanged(toolsChangedCb);
 
 			// Simulate SDK sending TOOLS_LIST_CHANGED
@@ -676,7 +676,7 @@ describe("ClientManager", () => {
 			// Clear call count from initialize
 			mockClient.getResources.mockClear();
 
-			const resourcesChangedCb = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const resourcesChangedCb = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 			mgr.onResourcesChanged(resourcesChangedCb);
 
 			// Simulate SDK sending RESOURCES_LIST_CHANGED
@@ -702,7 +702,7 @@ describe("ClientManager", () => {
 			const config: ClientManagerConfig = { apps: [{ name: "myapp", socketBaseName: "myapp" }] };
 			const mgr = new ClientManager(config, () => mockClient as any);
 
-			const notifyCb = jest.fn();
+			const notifyCb = vi.fn();
 			mgr.onNotification(notifyCb);
 
 			// Simulate SDK sending RESOURCES_UPDATED with an unprefixed URI
@@ -726,7 +726,7 @@ describe("ClientManager", () => {
 			const config: ClientManagerConfig = { apps: [{ name: "app1", socketBaseName: "app1" }] };
 			const mgr = new ClientManager(config, () => mockClient as any);
 
-			const notifyCb = jest.fn();
+			const notifyCb = vi.fn();
 			mgr.onNotification(notifyCb);
 
 			// Simulate SDK sending RESOURCES_UPDATED with additional properties
@@ -756,7 +756,7 @@ describe("ClientManager", () => {
 			const config: ClientManagerConfig = { apps: [{ name: "app", socketBaseName: "app" }] };
 			const mgr = new ClientManager(config, () => mockClient as any);
 
-			const notifyCb = jest.fn();
+			const notifyCb = vi.fn();
 			mgr.onNotification(notifyCb);
 
 			// Simulate SDK sending RESOURCES_UPDATED without params
@@ -778,7 +778,7 @@ describe("ClientManager", () => {
 			const config: ClientManagerConfig = { apps: [{ name: "app", socketBaseName: "app" }] };
 			const mgr = new ClientManager(config, () => mockClient as any);
 
-			const notifyCb = jest.fn();
+			const notifyCb = vi.fn();
 			mgr.onNotification(notifyCb);
 
 			// Simulate SDK sending RESOURCES_UPDATED with params but no uri
@@ -800,7 +800,7 @@ describe("ClientManager", () => {
 			const config: ClientManagerConfig = { apps: [{ name: "app", socketBaseName: "app" }] };
 			const mgr = new ClientManager(config, () => mockClient as any);
 
-			const notifyCb = jest.fn();
+			const notifyCb = vi.fn();
 			mgr.onNotification(notifyCb);
 
 			// Simulate SDK sending RESOURCES_UPDATED with empty uri
@@ -822,7 +822,7 @@ describe("ClientManager", () => {
 			const config: ClientManagerConfig = { apps: [{ name: "app", socketBaseName: "app" }] };
 			const mgr = new ClientManager(config, () => mockClient as any);
 
-			const elicitCb = jest.fn<ElicitationCallback>().mockResolvedValue({ action: "accept", content: { x: 1 } });
+			const elicitCb = vi.fn<ElicitationCallback>().mockResolvedValue({ action: "accept", content: { x: 1 } });
 			mgr.onElicitation(elicitCb);
 
 			const params = {
@@ -876,7 +876,7 @@ describe("ClientManager", () => {
 			const mgr = new ClientManager(config, () => mockClient as any);
 			await mgr.initialize();
 
-			const clientConnectedCb = jest.fn();
+			const clientConnectedCb = vi.fn();
 			mgr.onClientConnected(clientConnectedCb);
 
 			Object.defineProperty(mockClient, "isConnected", { get: () => true });
@@ -901,7 +901,7 @@ describe("ClientManager", () => {
 			const mgr = new ClientManager(config, () => mockClient as any);
 			await mgr.initialize();
 
-			const clientDisconnectedCb = jest.fn();
+			const clientDisconnectedCb = vi.fn();
 			mgr.onClientDisconnected(clientDisconnectedCb);
 
 			(disconnectedCallback as any)?.();

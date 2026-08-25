@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, jest } from "@jest/globals";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Resource, Tool } from "@modelcontextprotocol/sdk/types.js";
 
 import {
@@ -309,14 +309,14 @@ describe("utils", () => {
 
 		describe("log.error", () => {
 			it("should always output to stderr with ERROR prefix", () => {
-				const spy = jest.spyOn(console, "error").mockImplementation(() => {});
+				const spy = vi.spyOn(console, "error").mockImplementation(() => {});
 				log.error("something broke");
 				expect(spy).toHaveBeenCalledWith("[MCP Bridge]", "ERROR:", "something broke");
 				spy.mockRestore();
 			});
 
 			it("should output even when verbose is disabled", () => {
-				const spy = jest.spyOn(console, "error").mockImplementation(() => {});
+				const spy = vi.spyOn(console, "error").mockImplementation(() => {});
 				setVerbose(false);
 				log.error("critical failure");
 				expect(spy).toHaveBeenCalledWith("[MCP Bridge]", "ERROR:", "critical failure");
@@ -324,7 +324,7 @@ describe("utils", () => {
 			});
 
 			it("should handle multiple arguments", () => {
-				const spy = jest.spyOn(console, "error").mockImplementation(() => {});
+				const spy = vi.spyOn(console, "error").mockImplementation(() => {});
 				log.error("message", 123, { key: "value" });
 				expect(spy).toHaveBeenCalledWith("[MCP Bridge]", "ERROR:", "message", 123, { key: "value" });
 				spy.mockRestore();
@@ -333,14 +333,14 @@ describe("utils", () => {
 
 		describe("log.warn", () => {
 			it("should always output to stderr with WARN prefix", () => {
-				const spy = jest.spyOn(console, "error").mockImplementation(() => {});
+				const spy = vi.spyOn(console, "error").mockImplementation(() => {});
 				log.warn("watch out");
 				expect(spy).toHaveBeenCalledWith("[MCP Bridge]", "WARN:", "watch out");
 				spy.mockRestore();
 			});
 
 			it("should output even when verbose is disabled", () => {
-				const spy = jest.spyOn(console, "error").mockImplementation(() => {});
+				const spy = vi.spyOn(console, "error").mockImplementation(() => {});
 				setVerbose(false);
 				log.warn("something concerning");
 				expect(spy).toHaveBeenCalledWith("[MCP Bridge]", "WARN:", "something concerning");
@@ -350,14 +350,14 @@ describe("utils", () => {
 
 		describe("log.info", () => {
 			it("should be silent when verbose is disabled", () => {
-				const spy = jest.spyOn(console, "error").mockImplementation(() => {});
+				const spy = vi.spyOn(console, "error").mockImplementation(() => {});
 				log.info("status update");
 				expect(spy).not.toHaveBeenCalled();
 				spy.mockRestore();
 			});
 
 			it("should output to stderr with INFO prefix when verbose is enabled", () => {
-				const spy = jest.spyOn(console, "error").mockImplementation(() => {});
+				const spy = vi.spyOn(console, "error").mockImplementation(() => {});
 				setVerbose(true);
 				log.info("bridge started");
 				expect(spy).toHaveBeenCalledWith("[MCP Bridge]", "INFO:", "bridge started");
@@ -365,7 +365,7 @@ describe("utils", () => {
 			});
 
 			it("should handle multiple arguments", () => {
-				const spy = jest.spyOn(console, "error").mockImplementation(() => {});
+				const spy = vi.spyOn(console, "error").mockImplementation(() => {});
 				setVerbose(true);
 				log.info("message", 123, { key: "value" });
 				expect(spy).toHaveBeenCalledWith("[MCP Bridge]", "INFO:", "message", 123, { key: "value" });
@@ -375,14 +375,14 @@ describe("utils", () => {
 
 		describe("log.debug", () => {
 			it("should be silent when verbose is disabled", () => {
-				const spy = jest.spyOn(console, "error").mockImplementation(() => {});
+				const spy = vi.spyOn(console, "error").mockImplementation(() => {});
 				log.debug("detailed info");
 				expect(spy).not.toHaveBeenCalled();
 				spy.mockRestore();
 			});
 
 			it("should output to stderr with DEBUG prefix when verbose is enabled", () => {
-				const spy = jest.spyOn(console, "error").mockImplementation(() => {});
+				const spy = vi.spyOn(console, "error").mockImplementation(() => {});
 				setVerbose(true);
 				log.debug("session created:", "abc-123");
 				expect(spy).toHaveBeenCalledWith("[MCP Bridge]", "DEBUG:", "session created:", "abc-123");
@@ -474,7 +474,7 @@ describe("utils", () => {
 
 	describe("printHelp", () => {
 		it("should print help message to stdout", () => {
-			const consoleLogSpy = jest.spyOn(console, "log").mockImplementation(() => {});
+			const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
 			printHelp();
 

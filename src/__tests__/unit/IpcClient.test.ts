@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, jest } from "@jest/globals";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RECONNECT_POLL_INTERVAL_MS, REQUEST_TIMEOUT_MS } from "../../constants.js";
 import { IpcClient } from "../../IpcClient.js";
@@ -18,10 +18,10 @@ describe("IpcClient", () => {
 	let client: IpcClient;
 	let mockSocket: MockSocket;
 	let mockServer: MockServer;
-	let consoleErrorSpy: ReturnType<typeof jest.spyOn>;
+	let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
 	beforeAll(() => {
-		consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+		consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 	});
 
 	beforeEach(() => {
@@ -41,7 +41,7 @@ describe("IpcClient", () => {
 			},
 		);
 
-		jest.clearAllMocks();
+		vi.clearAllMocks();
 		consoleErrorSpy.mockClear();
 	});
 
@@ -250,16 +250,16 @@ describe("IpcClient", () => {
 
 		it("should timeout requests that take too long", async () => {
 			// Mock a very short timeout for testing
-			jest.useFakeTimers();
+			vi.useFakeTimers();
 
 			const requestPromise = client.getTools();
 
 			// Fast-forward time past the timeout
-			jest.advanceTimersByTime(REQUEST_TIMEOUT_MS + 1000); // REQUEST_TIMEOUT_MS + 1000
+			vi.advanceTimersByTime(REQUEST_TIMEOUT_MS + 1000); // REQUEST_TIMEOUT_MS + 1000
 
 			await expect(requestPromise).rejects.toThrow("Request timeout");
 
-			jest.useRealTimers();
+			vi.useRealTimers();
 		});
 
 		it("should clear timeout on successful response", async () => {
@@ -638,7 +638,7 @@ describe("IpcClient", () => {
 
 	describe("polling fallback for multi-client reconnection", () => {
 		it("should start polling when connection closes and no signal server is owned", async () => {
-			jest.useFakeTimers();
+			vi.useFakeTimers();
 
 			let socketFactoryCallCount = 0;
 			const trackingSocketFactory = () => {
@@ -669,17 +669,17 @@ describe("IpcClient", () => {
 			mockSocket = new MockSocket();
 
 			// Advance time by polling interval - should trigger reconnection attempt
-			jest.advanceTimersByTime(RECONNECT_POLL_INTERVAL_MS);
+			vi.advanceTimersByTime(RECONNECT_POLL_INTERVAL_MS);
 
 			// Verify polling started by checking that socket factory was called again
 			expect(socketFactoryCallCount).toBeGreaterThan(callCountAfterConnect);
 
 			testClient.disconnect();
-			jest.useRealTimers();
+			vi.useRealTimers();
 		});
 
 		it("should not start polling when signal server is owned and connection closes", async () => {
-			jest.useFakeTimers();
+			vi.useFakeTimers();
 
 			let socketFactoryCallCount = 0;
 			const trackingSocketFactory = () => {
@@ -714,17 +714,17 @@ describe("IpcClient", () => {
 			mockSocket = new MockSocket();
 
 			// Advance time by polling interval
-			jest.advanceTimersByTime(RECONNECT_POLL_INTERVAL_MS);
+			vi.advanceTimersByTime(RECONNECT_POLL_INTERVAL_MS);
 
 			// Verify polling did NOT start - socket factory should not have been called again
 			expect(socketFactoryCallCount).toBe(callCountAfterConnect);
 
 			testClient.disconnect();
-			jest.useRealTimers();
+			vi.useRealTimers();
 		});
 
 		it("should clear poll interval on disconnect", async () => {
-			jest.useFakeTimers();
+			vi.useFakeTimers();
 
 			// Connect and then close to start polling
 			const connectPromise = client.connect(100);
@@ -738,15 +738,15 @@ describe("IpcClient", () => {
 			client.disconnect();
 
 			// Polling should be stopped - verify no errors on timer advancement
-			jest.advanceTimersByTime(10000);
+			vi.advanceTimersByTime(10000);
 
 			expect(client.isConnected).toBe(false);
 
-			jest.useRealTimers();
+			vi.useRealTimers();
 		});
 
 		it("should stop polling when connection is re-established", async () => {
-			jest.useFakeTimers();
+			vi.useFakeTimers();
 
 			let connectCount = 0;
 			const originalSocketFactory = () => {
@@ -773,18 +773,18 @@ describe("IpcClient", () => {
 			mockSocket = new MockSocket();
 
 			// Advance time to trigger polling
-			jest.advanceTimersByTime(RECONNECT_POLL_INTERVAL_MS);
+			vi.advanceTimersByTime(RECONNECT_POLL_INTERVAL_MS);
 
 			// Clean up
 			testClient.disconnect();
 
-			jest.useRealTimers();
+			vi.useRealTimers();
 		});
 	});
 
 	describe("signal server error handling", () => {
 		it("should handle EADDRINUSE by falling back to polling", async () => {
-			jest.useFakeTimers();
+			vi.useFakeTimers();
 
 			// Create a custom mock server that simulates EADDRINUSE
 			const errorMockServer = new MockServer();
@@ -806,10 +806,10 @@ describe("IpcClient", () => {
 			errorMockServer.emit("error", error);
 
 			// Should fall back to polling
-			jest.advanceTimersByTime(RECONNECT_POLL_INTERVAL_MS);
+			vi.advanceTimersByTime(RECONNECT_POLL_INTERVAL_MS);
 
 			testClient.disconnect();
-			jest.useRealTimers();
+			vi.useRealTimers();
 		});
 
 		it("should not retry signal server creation when another process is actively using the socket", async () => {
@@ -823,7 +823,7 @@ describe("IpcClient", () => {
 		});
 
 		it("should not start polling when stale socket recovery succeeds", async () => {
-			jest.useFakeTimers();
+			vi.useFakeTimers();
 
 			// Track how many servers were created (for detecting retries)
 			let serverFactoryCallCount = 0;
@@ -839,7 +839,7 @@ describe("IpcClient", () => {
 			const testClient = new IpcClient(testConfig, () => mockSocket as any, trackingServerFactory);
 
 			// Spy on startPolling to verify it's NOT called
-			const startPollingSpy = jest.spyOn(testClient as any, "startPolling");
+			const startPollingSpy = vi.spyOn(testClient as any, "startPolling");
 
 			// Start signal listener - this is the first server creation
 			testClient.startSignalListener();
@@ -852,7 +852,7 @@ describe("IpcClient", () => {
 			mockServer.emit("error", error);
 
 			// Allow handleSocketInUse() to complete (it's async)
-			await jest.runAllTimersAsync();
+			await vi.runAllTimersAsync();
 
 			// After stale socket recovery, the signal server should be recreated
 			// (serverFactoryCallCount should be greater than initial)
@@ -862,11 +862,11 @@ describe("IpcClient", () => {
 			expect(startPollingSpy).not.toHaveBeenCalled();
 
 			testClient.disconnect();
-			jest.useRealTimers();
+			vi.useRealTimers();
 		});
 
 		it("should start polling when handleSocketInUse fails", async () => {
-			jest.useFakeTimers();
+			vi.useFakeTimers();
 
 			// Create client
 			const testClient = new IpcClient(
@@ -881,8 +881,8 @@ describe("IpcClient", () => {
 			);
 
 			// Spy on methods
-			const startPollingSpy = jest.spyOn(testClient as any, "startPolling");
-			const handleSocketInUseSpy = jest
+			const startPollingSpy = vi.spyOn(testClient as any, "startPolling");
+			const handleSocketInUseSpy = vi
 				.spyOn(testClient as any, "handleSocketInUse")
 				.mockRejectedValue(new Error("isSocketActive failed"));
 
@@ -914,13 +914,13 @@ describe("IpcClient", () => {
 			expect(startPollingSpy).toHaveBeenCalled();
 
 			testClient.disconnect();
-			jest.useRealTimers();
+			vi.useRealTimers();
 		});
 	});
 
 	describe("disconnect cleanup", () => {
 		it("should clean up poll interval on disconnect", () => {
-			jest.useFakeTimers();
+			vi.useFakeTimers();
 
 			// Start signal listener and then disconnect
 			client.startSignalListener();
@@ -932,9 +932,9 @@ describe("IpcClient", () => {
 			expect(mockServer.isListening()).toBe(false);
 
 			// Verify no timer errors on advancement
-			jest.advanceTimersByTime(10000);
+			vi.advanceTimersByTime(10000);
 
-			jest.useRealTimers();
+			vi.useRealTimers();
 		});
 
 		it("should clean up all resources on disconnect", async () => {
@@ -964,7 +964,7 @@ describe("IpcClient", () => {
 
 		describe("type guards", () => {
 			it("should distinguish notifications from IPC responses (notification has method but no id)", async () => {
-				const notificationCallback = jest.fn();
+				const notificationCallback = vi.fn();
 				client.onNotification(notificationCallback);
 
 				// Send a notification (has method but no id)
@@ -978,7 +978,7 @@ describe("IpcClient", () => {
 			});
 
 			it("should not treat IPC response as notification (response has id)", async () => {
-				const notificationCallback = jest.fn();
+				const notificationCallback = vi.fn();
 				client.onNotification(notificationCallback);
 
 				// Send a request and its response
@@ -997,7 +997,7 @@ describe("IpcClient", () => {
 			});
 
 			it("should handle notification without params", async () => {
-				const notificationCallback = jest.fn();
+				const notificationCallback = vi.fn();
 				client.onNotification(notificationCallback);
 
 				// Send a notification without params
@@ -1012,9 +1012,9 @@ describe("IpcClient", () => {
 
 		describe("multiple callbacks", () => {
 			it("should invoke all registered callbacks when notification is received", async () => {
-				const callback1 = jest.fn();
-				const callback2 = jest.fn();
-				const callback3 = jest.fn();
+				const callback1 = vi.fn();
+				const callback2 = vi.fn();
+				const callback3 = vi.fn();
 
 				client.onNotification(callback1);
 				client.onNotification(callback2);
@@ -1031,7 +1031,7 @@ describe("IpcClient", () => {
 			});
 
 			it("should invoke callbacks with correct arguments for each notification", async () => {
-				const callback = jest.fn();
+				const callback = vi.fn();
 				client.onNotification(callback);
 
 				// Send multiple notifications
@@ -1048,7 +1048,7 @@ describe("IpcClient", () => {
 
 		describe("error isolation", () => {
 			it("should catch and log errors from throwing callbacks", async () => {
-				const errorCallback = jest.fn(() => {
+				const errorCallback = vi.fn(() => {
 					throw new Error("Callback failed");
 				});
 				client.onNotification(errorCallback);
@@ -1068,14 +1068,14 @@ describe("IpcClient", () => {
 			});
 
 			it("should continue invoking remaining callbacks after one throws", async () => {
-				const callback1 = jest.fn(() => {
+				const callback1 = vi.fn(() => {
 					throw new Error("First callback failed");
 				});
-				const callback2 = jest.fn();
-				const callback3 = jest.fn(() => {
+				const callback2 = vi.fn();
+				const callback3 = vi.fn(() => {
 					throw new Error("Third callback failed");
 				});
-				const callback4 = jest.fn();
+				const callback4 = vi.fn();
 
 				client.onNotification(callback1);
 				client.onNotification(callback2);
@@ -1100,7 +1100,7 @@ describe("IpcClient", () => {
 
 		describe("message stream parsing", () => {
 			it("should handle notifications mixed with IPC responses in the stream", async () => {
-				const notificationCallback = jest.fn();
+				const notificationCallback = vi.fn();
 				client.onNotification(notificationCallback);
 
 				// Start a request
@@ -1130,7 +1130,7 @@ describe("IpcClient", () => {
 			});
 
 			it("should handle partial notification messages across chunks", async () => {
-				const notificationCallback = jest.fn();
+				const notificationCallback = vi.fn();
 				client.onNotification(notificationCallback);
 
 				const notification = { method: "partial/test", params: { complete: true } };
@@ -1147,7 +1147,7 @@ describe("IpcClient", () => {
 			});
 
 			it("should ignore non-object parsed messages", async () => {
-				const notificationCallback = jest.fn();
+				const notificationCallback = vi.fn();
 				client.onNotification(notificationCallback);
 
 				// Send a non-object JSON value
@@ -1172,7 +1172,7 @@ describe("IpcClient", () => {
 
 		describe("type guards", () => {
 			it("should identify elicitation request (has both id and method: elicitation/create)", async () => {
-				const elicitationCallback = jest
+				const elicitationCallback = vi
 					.fn<ElicitationCallback>()
 					.mockResolvedValue({ action: "accept", content: { name: "test" } });
 				client.onElicitation(elicitationCallback);
@@ -1207,7 +1207,7 @@ describe("IpcClient", () => {
 			});
 
 			it("should not treat regular IPC response as elicitation request", async () => {
-				const elicitationCallback = jest.fn<ElicitationCallback>();
+				const elicitationCallback = vi.fn<ElicitationCallback>();
 				client.onElicitation(elicitationCallback);
 
 				// Send a regular IPC response (has id but no method)
@@ -1224,7 +1224,7 @@ describe("IpcClient", () => {
 			});
 
 			it("should not treat notification as elicitation request", async () => {
-				const elicitationCallback = jest.fn<ElicitationCallback>();
+				const elicitationCallback = vi.fn<ElicitationCallback>();
 				client.onElicitation(elicitationCallback);
 
 				// Send a notification (has method but no id)
@@ -1237,7 +1237,7 @@ describe("IpcClient", () => {
 			});
 
 			it("should not treat message with different method as elicitation", async () => {
-				const elicitationCallback = jest.fn<ElicitationCallback>();
+				const elicitationCallback = vi.fn<ElicitationCallback>();
 				client.onElicitation(elicitationCallback);
 
 				// Send a message with id and method, but not elicitation/create
@@ -1256,7 +1256,7 @@ describe("IpcClient", () => {
 
 		describe("callback registration", () => {
 			it("should register elicitation callback", () => {
-				const callback = jest.fn<ElicitationCallback>().mockResolvedValue({ action: "accept" });
+				const callback = vi.fn<ElicitationCallback>().mockResolvedValue({ action: "accept" });
 				client.onElicitation(callback);
 
 				// No error should be thrown
@@ -1264,8 +1264,8 @@ describe("IpcClient", () => {
 			});
 
 			it("should replace previous elicitation callback", async () => {
-				const callback1 = jest.fn<ElicitationCallback>().mockResolvedValue({ action: "decline" });
-				const callback2 = jest.fn<ElicitationCallback>().mockResolvedValue({ action: "accept" });
+				const callback1 = vi.fn<ElicitationCallback>().mockResolvedValue({ action: "decline" });
+				const callback2 = vi.fn<ElicitationCallback>().mockResolvedValue({ action: "accept" });
 
 				client.onElicitation(callback1);
 				client.onElicitation(callback2);
@@ -1292,7 +1292,7 @@ describe("IpcClient", () => {
 
 		describe("response handling", () => {
 			it("should send elicitation response back to Stream Deck", async () => {
-				const callback = jest
+				const callback = vi
 					.fn<ElicitationCallback>()
 					.mockResolvedValue({ action: "accept", content: { name: "John" } });
 				client.onElicitation(callback);
@@ -1353,7 +1353,7 @@ describe("IpcClient", () => {
 			});
 
 			it("should send decline response when callback throws error", async () => {
-				const callback = jest.fn<ElicitationCallback>().mockRejectedValue(new Error("Callback failed"));
+				const callback = vi.fn<ElicitationCallback>().mockRejectedValue(new Error("Callback failed"));
 				client.onElicitation(callback);
 
 				const elicitationRequest = {
@@ -1385,12 +1385,12 @@ describe("IpcClient", () => {
 
 		describe("timeout handling", () => {
 			it("should send decline response when callback times out", async () => {
-				jest.useFakeTimers();
+				vi.useFakeTimers();
 
 				// Create a callback that never resolves, forcing the Promise.race timeout to trigger.
 				// The actual ELICITATION_TIMEOUT_MS is 5 minutes (300,000 ms).
 				// We use fake timers to advance past this timeout without waiting.
-				const callback = jest.fn<ElicitationCallback>().mockImplementation(
+				const callback = vi.fn<ElicitationCallback>().mockImplementation(
 					() => new Promise(() => {}), // Never resolves
 				);
 				client.onElicitation(callback);
@@ -1411,7 +1411,7 @@ describe("IpcClient", () => {
 				await Promise.resolve();
 
 				// Advance timers past ELICITATION_TIMEOUT_MS (5 minutes) to trigger the timeout
-				await jest.advanceTimersByTimeAsync(5 * 60_000 + 100);
+				await vi.advanceTimersByTimeAsync(5 * 60_000 + 100);
 
 				const written = mockSocket.getWrittenData();
 				const response = written.find((w) => {
@@ -1429,14 +1429,14 @@ describe("IpcClient", () => {
 					"Elicitation timeout",
 				);
 
-				jest.useRealTimers();
+				vi.useRealTimers();
 			});
 
 			it("should extend timeout for pending tool call when elicitation is received", async () => {
 				setVerbose(true);
 
 				// Register elicitation callback that resolves quickly
-				const elicitationCallback = jest.fn<ElicitationCallback>().mockResolvedValue({
+				const elicitationCallback = vi.fn<ElicitationCallback>().mockResolvedValue({
 					action: "accept",
 					content: { confirmed: true },
 				});
@@ -1484,7 +1484,7 @@ describe("IpcClient", () => {
 				setVerbose(true);
 
 				// Register elicitation callback
-				const elicitationCallback = jest.fn<ElicitationCallback>().mockResolvedValue({ action: "accept" });
+				const elicitationCallback = vi.fn<ElicitationCallback>().mockResolvedValue({ action: "accept" });
 				client.onElicitation(elicitationCallback);
 
 				// Send an elicitation request with a relatedToolCallId that doesn't match any pending request
@@ -1513,8 +1513,8 @@ describe("IpcClient", () => {
 
 		describe("message stream parsing", () => {
 			it("should handle elicitation requests mixed with other messages", async () => {
-				const notificationCallback = jest.fn();
-				const elicitationCallback = jest.fn<ElicitationCallback>().mockResolvedValue({ action: "cancel" });
+				const notificationCallback = vi.fn();
+				const elicitationCallback = vi.fn<ElicitationCallback>().mockResolvedValue({ action: "cancel" });
 
 				client.onNotification(notificationCallback);
 				client.onElicitation(elicitationCallback);
@@ -1571,7 +1571,7 @@ describe("IpcClient", () => {
 			it("should log error when sending elicitation response with destroyed socket", async () => {
 				// Client is already connected via beforeEach
 				// Register callback that returns after delay
-				const elicitationCallback = jest.fn<ElicitationCallback>().mockImplementation(async () => {
+				const elicitationCallback = vi.fn<ElicitationCallback>().mockImplementation(async () => {
 					// Wait a bit, then return
 					await wait(50);
 					return { action: "accept", content: { name: "test" } };
