@@ -54,10 +54,10 @@ pnpm test
 pnpm test:coverage
 
 # Run a single test file
-node --experimental-vm-modules node_modules/jest/bin/jest.js src/__tests__/unit/McpBridge.test.ts
+npx vitest run src/__tests__/unit/McpBridge.test.ts
 
 # Run tests matching a pattern
-node --experimental-vm-modules node_modules/jest/bin/jest.js -t "test name pattern"
+npx vitest run -t "test name pattern"
 ```
 
 ### Coverage Requirements
