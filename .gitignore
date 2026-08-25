@@ -33,3 +33,6 @@ coverage/
 
 # Work in progress / scratch files
 .wip/
+
+# Local
+*.local
