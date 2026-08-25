@@ -301,19 +301,19 @@ describe("HTTP Session Timeout", () => {
 			onclose: (() => void) | null;
 		}
 
-		interface SessionData {
+		interface TestSessionData {
 			server: { connect: Mock };
 			transport: MockTransport;
 			lastActivity: number;
 		}
 
 		interface CreateSessionResult {
-			sessionData: SessionData;
+			sessionData: TestSessionData;
 			triggerInitialized: (id: string) => void;
 			triggerClose: () => void;
 		}
 
-		const createTestSession = (sessions: Map<string, SessionData>): ((sessionId: string) => CreateSessionResult) => {
+		const createTestSession = (sessions: Map<string, TestSessionData>): ((sessionId: string) => CreateSessionResult) => {
 			return (sessionId: string): CreateSessionResult => {
 				const transport: MockTransport = {
 					sessionId: null,
@@ -321,7 +321,7 @@ describe("HTTP Session Timeout", () => {
 					onclose: null,
 				};
 
-				const sessionData: SessionData = {
+				const sessionData: TestSessionData = {
 					server: { connect: vi.fn() },
 					transport,
 					lastActivity: Date.now(),
@@ -346,7 +346,7 @@ describe("HTTP Session Timeout", () => {
 		};
 
 		it("should not register session before onsessioninitialized fires", () => {
-			const sessions = new Map<string, SessionData>();
+			const sessions = new Map<string, TestSessionData>();
 			const createSession = createTestSession(sessions);
 
 			const { sessionData, triggerInitialized } = createSession("test-session-id");
@@ -361,7 +361,7 @@ describe("HTTP Session Timeout", () => {
 		});
 
 		it("should not leave zombie sessions when connection fails before initialization", () => {
-			const sessions = new Map<string, SessionData>();
+			const sessions = new Map<string, TestSessionData>();
 			const createSession = createTestSession(sessions);
 
 			createSession("failed-session-id");
@@ -371,7 +371,7 @@ describe("HTTP Session Timeout", () => {
 		});
 
 		it("should clean up session when transport onclose fires", () => {
-			const sessions = new Map<string, SessionData>();
+			const sessions = new Map<string, TestSessionData>();
 			const createSession = createTestSession(sessions);
 
 			const { triggerInitialized, triggerClose } = createSession("session-to-close");
@@ -385,7 +385,7 @@ describe("HTTP Session Timeout", () => {
 		});
 
 		it("should handle onclose gracefully when session was never registered", () => {
-			const sessions = new Map<string, SessionData>();
+			const sessions = new Map<string, TestSessionData>();
 			const createSession = createTestSession(sessions);
 
 			const { triggerClose } = createSession("unregistered-session");
@@ -395,7 +395,7 @@ describe("HTTP Session Timeout", () => {
 		});
 
 		it("should allow session data to be used before registration completes", () => {
-			const sessions = new Map<string, SessionData>();
+			const sessions = new Map<string, TestSessionData>();
 			const createSession = createTestSession(sessions);
 
 			const { sessionData, triggerInitialized } = createSession("new-session");
