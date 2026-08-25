@@ -8,9 +8,9 @@ import { createDeferred } from "../helpers/testUtils.js";
 
 const logMock = vi.fn();
 
-// Generous enough to absorb Vitest's cold transform of the dynamically imported module,
-// while still failing fast if the startup promise never settles.
-const TEST_TIMEOUT_MS = 1000;
+// Generous enough to absorb Vitest's cold transform of the dynamically imported module
+// on slow CI runners, while still failing if the startup promise never settles.
+const TEST_TIMEOUT_MS = 5000;
 
 interface StartupHarness {
 	mockApp: Express;
