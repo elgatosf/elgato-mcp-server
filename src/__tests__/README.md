@@ -8,17 +8,17 @@ This directory contains comprehensive test coverage for the Elgato MCP Server pr
 | ----------- | ------------------------- |
 | Build       | ✅ Passing                |
 | Test Suites | 12 of 12 passing (100%)   |
-| Tests       | 294 of 294 passing (100%) |
+| Tests       | 320 of 320 passing (100%) |
 | Skipped     | 0 tests                   |
 
 ### Coverage Metrics
 
 | Metric     | Coverage | Threshold |
 | ---------- | -------- | --------- |
-| Statements | 87.33%   | 80% ✅    |
-| Branches   | 81.25%   | 80% ✅    |
-| Functions  | 90.25%   | 80% ✅    |
-| Lines      | 87.73%   | 80% ✅    |
+| Statements | 88.91%   | 80% ✅    |
+| Branches   | 83.27%   | 80% ✅    |
+| Functions  | 89.88%   | 80% ✅    |
+| Lines      | 89.23%   | 80% ✅    |
 
 ## Test Structure
 
@@ -31,14 +31,14 @@ src/__tests__/
 │   ├── MockTransport.ts                  # Mock implementation of MCP Transport
 │   └── testUtils.ts                      # Helper functions for creating test data
 ├── unit/                                 # Unit tests (8 test files, 253 tests)
-│   ├── constants.test.ts                 # Socket path generation tests (14 tests)
-│   ├── utils.test.ts                     # Utility functions tests (53 tests)
-│   ├── IpcClient.test.ts                 # IPC client tests (65 tests, includes elicitation)
-│   ├── ClientManager.test.ts             # Client manager aggregation tests (42 tests)
+│   ├── constants.test.ts                 # Socket path generation tests (6 tests)
+│   ├── utils.test.ts                     # Utility functions tests (43 tests)
+│   ├── IpcClient.test.ts                 # IPC client tests (69 tests, includes elicitation)
+│   ├── ClientManager.test.ts             # Client manager aggregation tests (43 tests)
 │   ├── McpBridge.test.ts                 # MCP bridge logic tests (56 tests, includes elicitation)
 │   ├── stdio.test.ts                     # stdio transport lifecycle tests (10 tests)
 │   ├── http-server-startup.test.ts       # HTTP server initialization tests (5 tests)
-│   └── http-session-timeout.test.ts      # HTTP session timeout tests (6 tests)
+│   └── http-session-timeout.test.ts      # HTTP session timeout tests (21 tests)
 └── integration/                          # Integration tests (4 test files, 67 tests)
     ├── transports.test.ts                # Stdio and HTTP transport tests
     ├── mcp-protocol.test.ts              # MCP protocol endpoint tests (31 tests)
@@ -61,7 +61,7 @@ pnpm test:ci           # Run tests in CI/CD mode
 
 ### Unit Tests
 
-#### constants.test.ts (14 tests)
+#### constants.test.ts (6 tests)
 
 - Cross-platform socket path generation (Windows, macOS, Linux)
 - Timeout constants validation
@@ -70,7 +70,7 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Default server info validation
 - Log prefix validation
 
-#### utils.test.ts (53 tests)
+#### utils.test.ts (43 tests)
 
 - Tool conversion with various input formats
 - Schema transformation correctness
@@ -81,7 +81,7 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Logging functionality
 - Resource conversion (`convertToMcpResources`)
 
-#### IpcClient.test.ts (65 tests)
+#### IpcClient.test.ts (69 tests)
 
 - Connection lifecycle (connect, disconnect, timeout, errors)
 - Message parsing and buffer processing
@@ -97,7 +97,7 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Resources API (getResources, readResource)
 - Elicitation handling (type guard, callback registration, response handling, timeout, error handling)
 
-#### ClientManager.test.ts (42 tests)
+#### ClientManager.test.ts (43 tests)
 
 - Multi-client aggregation of tools and resources
 - `appname__` prefix application and stripping
@@ -127,7 +127,7 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Generic error handling
 - Graceful startup when `@ngrok/ngrok` cannot be loaded
 
-#### http-session-timeout.test.ts (6 tests)
+#### http-session-timeout.test.ts (21 tests)
 
 - Session timeout after idle period
 - Multiple session cleanup
@@ -243,8 +243,8 @@ Mock implementation of MCP Transport for testing MCP protocol communication:
 
 | Setting          | Value                                 |
 | ---------------- | ------------------------------------- |
-| Test Framework   | Jest 30.2.0 with ts-jest              |
-| Module System    | ESM (via `--experimental-vm-modules`) |
+| Test Framework   | Vitest 4                              |
+| Module System    | ESM (native TypeScript via Vite)      |
 | Test Environment | Node.js                               |
 | Test Timeout     | 10 seconds                            |
 | Coverage Formats | text, lcov, html                      |
@@ -263,7 +263,7 @@ The project maintains 80% coverage thresholds for all metrics:
 - **Cross-Platform Testing** - Mocks `process.platform` to test Windows, macOS, and Linux paths
 - **Comprehensive Mocking** - All external dependencies (net, fs) are mocked for isolation
 - **Type Safety** - Full TypeScript support with proper type checking
-- **ESM Support** - Uses experimental VM modules for ESM compatibility
+- **ESM Support** - Native TypeScript and ESM handling via Vitest (no experimental VM modules)
 - **CI/CD Ready** - Dedicated script for CI/CD pipelines with coverage reporting
 
 ## Implementation Notes

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, jest } from "@jest/globals";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Server } from "node:http";
 
 import { MCP_ERROR_CODES } from "../../constants.js";
@@ -55,10 +55,10 @@ describe("HTTP Session Lifecycle Integration Tests", () => {
 		it("should return 200 and update lastActivity for existing session", async () => {
 			const sessionId = "test-session-123";
 			const mockTransport = {
-				handleRequest: jest.fn((_req: unknown, res: any) => {
+				handleRequest: vi.fn((_req: unknown, res: any) => {
 					res.json({ jsonrpc: "2.0", result: {}, id: 1 });
 				}),
-				close: jest.fn(),
+				close: vi.fn(),
 			};
 			sessions.set(sessionId, {
 				server: bridge.createServer(),
@@ -252,7 +252,7 @@ describe("HTTP Session Lifecycle Integration Tests", () => {
 
 		it("should return 204 and remove session for valid session ID", async () => {
 			const sessionId = "session-to-delete";
-			const mockTransport = { close: jest.fn() };
+			const mockTransport = { close: vi.fn() };
 			sessions.set(sessionId, {
 				server: bridge.createServer(),
 				transport: mockTransport as any,

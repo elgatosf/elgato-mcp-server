@@ -1,13 +1,16 @@
-import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Mock, MockInstance } from "vitest";
 import type { Express } from "express";
 import type { Server as HttpServer } from "node:http";
 
 import { MockMcpBridge } from "../helpers/MockMcpBridge.js";
 import { createDeferred } from "../helpers/testUtils.js";
 
-const logMock = jest.fn();
+const logMock = vi.fn();
 
-const TEST_TIMEOUT_MS = 100;
+// Generous enough to absorb Vitest's cold transform of the dynamically imported module
+// on slow CI runners, while still failing if the startup promise never settles.
+const TEST_TIMEOUT_MS = 5000;
 
 interface StartupHarness {
 	mockApp: Express;
@@ -22,25 +25,25 @@ const createStartupHarness = (): StartupHarness => {
 	let errorHandler: ((error: NodeJS.ErrnoException) => void) | undefined;
 
 	const mockServer = {
-		on: jest.fn((event: string, handler: (error: NodeJS.ErrnoException) => void) => {
+		on: vi.fn((event: string, handler: (error: NodeJS.ErrnoException) => void) => {
 			if (event === "error") {
 				errorHandler = handler;
 				serverReady.resolve();
 			}
 			return mockServer;
 		}),
-		close: jest.fn(),
+		close: vi.fn(),
 		emitError: (error: NodeJS.ErrnoException) => {
 			errorHandler?.(error);
 		},
 	} as unknown as HttpServer & { emitError: (error: NodeJS.ErrnoException) => void };
 
 	const mockApp = {
-		use: jest.fn().mockReturnThis(),
-		get: jest.fn().mockReturnThis(),
-		post: jest.fn().mockReturnThis(),
-		delete: jest.fn().mockReturnThis(),
-		listen: jest.fn((_port: number, _callback?: () => void) => mockServer),
+		use: vi.fn().mockReturnThis(),
+		get: vi.fn().mockReturnThis(),
+		post: vi.fn().mockReturnThis(),
+		delete: vi.fn().mockReturnThis(),
+		listen: vi.fn((_port: number, _callback?: () => void) => mockServer),
 	} as unknown as Express;
 
 	mockExpressApp = mockApp;
@@ -49,11 +52,11 @@ const createStartupHarness = (): StartupHarness => {
 };
 
 describe("HTTP server startup error handling", () => {
-	let processOnSpy: jest.SpiedFunction<typeof process.on>;
+	let processOnSpy: MockInstance<typeof process.on>;
 
 	beforeEach(() => {
-		jest.clearAllMocks();
-		processOnSpy = jest.spyOn(process, "on").mockImplementation(() => process);
+		vi.clearAllMocks();
+		processOnSpy = vi.spyOn(process, "on").mockImplementation(() => process);
 	});
 
 	afterEach(() => {
@@ -63,16 +66,16 @@ describe("HTTP server startup error handling", () => {
 	const setupModule = async (options?: {
 		ngrokModuleError?: Error;
 	}): Promise<typeof import("../../transports/http.js")> => {
-		jest.resetModules();
+		vi.resetModules();
 		logMock.mockClear();
 
 		if (options?.ngrokModuleError) {
-			jest.unstable_mockModule("@ngrok/ngrok", () => {
+			vi.doMock("@ngrok/ngrok", () => {
 				throw options.ngrokModuleError;
 			});
 		}
 
-		jest.unstable_mockModule("../../utils.js", () => ({
+		vi.doMock("../../utils.js", () => ({
 			log: {
 				error: logMock,
 				warn: logMock,
@@ -80,15 +83,15 @@ describe("HTTP server startup error handling", () => {
 				debug: logMock,
 			},
 		}));
-		jest.unstable_mockModule("../../McpBridge.js", () => ({
+		vi.doMock("../../McpBridge.js", () => ({
 			McpBridge: MockMcpBridge,
-			createInitializedBridge: jest.fn<() => Promise<MockMcpBridge>>().mockResolvedValue(new MockMcpBridge()),
+			createInitializedBridge: vi.fn<() => Promise<MockMcpBridge>>().mockResolvedValue(new MockMcpBridge()),
 		}));
-		jest.unstable_mockModule("express", () => ({
+		vi.doMock("express", () => ({
 			default: Object.assign(
-				jest.fn(() => mockExpressApp),
+				vi.fn(() => mockExpressApp),
 				{
-					json: jest.fn(() => "json-middleware"),
+					json: vi.fn(() => "json-middleware"),
 				},
 			),
 		}));
@@ -172,13 +175,13 @@ describe("HTTP server startup error handling", () => {
 		"should start the server when --ngrok is set but @ngrok/ngrok cannot be loaded",
 		async () => {
 			const { mockApp, mockServer } = createStartupHarness();
-			(mockApp.listen as unknown as jest.Mock).mockImplementation((...args: unknown[]) => {
+			(mockApp.listen as unknown as Mock).mockImplementation((...args: unknown[]) => {
 				const callback = args[1] as (() => void) | undefined;
 				callback?.();
 				return mockServer;
 			});
 			// Successful startup schedules the idle-session cleanup interval; stub it so Jest can exit.
-			const setIntervalSpy = jest
+			const setIntervalSpy = vi
 				.spyOn(global, "setInterval")
 				.mockReturnValue(0 as unknown as ReturnType<typeof setInterval>);
 
@@ -188,7 +191,7 @@ describe("HTTP server startup error handling", () => {
 
 				await expect(startPromise).resolves.toBeUndefined();
 				expect(logMock).toHaveBeenCalledWith("Failed to start ngrok tunnel:", expect.any(Error));
-				expect((mockApp as unknown as { listen: jest.Mock }).listen).toHaveBeenCalledWith(4567, expect.any(Function));
+				expect((mockApp as unknown as { listen: Mock }).listen).toHaveBeenCalledWith(4567, expect.any(Function));
 			} finally {
 				setIntervalSpy.mockRestore();
 			}

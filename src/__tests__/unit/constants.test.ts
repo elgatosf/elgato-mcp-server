@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { getAppSocketPaths, KNOWN_APPS, TOOL_PREFIX_SEPARATOR } from "../../constants.js";
 import type { AppDefinition } from "../../types.js";

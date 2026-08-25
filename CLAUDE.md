@@ -12,7 +12,7 @@ MCP server bridging AI assistants (Claude Desktop) and Elgato apps (e.g., Stream
 pnpm build              # Compile TypeScript (outputs to bin/)
 pnpm lint               # ESLint with zero warnings tolerance
 pnpm lint:fix           # Prettier formatting
-pnpm test               # All tests (Jest with ESM via --experimental-vm-modules)
+pnpm test               # All tests (Vitest)
 pnpm test:unit          # Unit tests only
 pnpm test:integration   # Integration tests only
 pnpm test:coverage      # Tests with coverage report
@@ -21,12 +21,12 @@ pnpm test:watch         # Watch mode
 
 **Run a single test file:**
 ```bash
-node --experimental-vm-modules node_modules/jest/bin/jest.js src/__tests__/unit/McpBridge.test.ts
+pnx vitest run src/__tests__/unit/McpBridge.test.ts
 ```
 
 **Run a single test by name:**
 ```bash
-node --experimental-vm-modules node_modules/jest/bin/jest.js -t "test name pattern"
+pnx vitest run -t "test name pattern"
 ```
 
 ## Architecture
@@ -55,7 +55,7 @@ All feature additions, bug fixes, and refactoring follow a three-phase workflow 
 
 ## Testing
 
-- Jest 30 with ts-jest ESM preset. Config in `jest.config.js`
+- Vitest 4 with native TypeScript/ESM support. Config in `vitest.config.ts`
 - Coverage thresholds: 80% for statements, branches, functions, and lines
 - Test helpers and mocks in `src/__tests__/helpers/testUtils.ts` (MockSocket, MockServer, MockTransport, MockMcpBridge)
 - `clearMocks`, `resetMocks`, `restoreMocks` are all **false** — tests manage their own mock lifecycle

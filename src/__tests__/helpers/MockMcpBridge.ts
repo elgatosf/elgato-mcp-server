@@ -1,4 +1,5 @@
-import { jest } from "@jest/globals";
+import { vi } from "vitest";
+import type { Mock } from "vitest";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 /**
@@ -30,12 +31,12 @@ export class MockMcpBridge {
 		this._isConnected = value;
 	}
 
-	public initialize = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
-	public close = jest.fn<() => void>();
-	public createServer = jest.fn<() => McpServer>();
-	public onToolsChanged = jest.fn<(callback: () => Promise<void>) => void>();
-	public onResourcesChanged = jest.fn<(callback: () => Promise<void>) => void>();
-	public onClientNotification = jest.fn<(callback: (method: string, params?: unknown) => Promise<void>) => void>();
+	public initialize = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+	public close = vi.fn<() => void>();
+	public createServer = vi.fn<() => McpServer>();
+	public onToolsChanged = vi.fn<(callback: () => Promise<void>) => void>();
+	public onResourcesChanged = vi.fn<(callback: () => Promise<void>) => void>();
+	public onClientNotification = vi.fn<(callback: (method: string, params?: unknown) => Promise<void>) => void>();
 }
 
 /**
@@ -48,19 +49,19 @@ export class MockMcpBridge {
  * ```typescript
  * const mockBridge = createMockMcpBridge({
  *   isConnected: true,
- *   initialize: jest.fn().mockRejectedValue(new Error("Connection failed")),
+ *   initialize: vi.fn().mockRejectedValue(new Error("Connection failed")),
  * });
  * ```
  */
 export function createMockMcpBridge(
 	overrides: Partial<{
 		isConnected: boolean;
-		initialize: jest.Mock<() => Promise<void>>;
-		close: jest.Mock<() => void>;
-		createServer: jest.Mock<() => McpServer>;
-		onToolsChanged: jest.Mock<(callback: () => Promise<void>) => void>;
-		onResourcesChanged: jest.Mock<(callback: () => Promise<void>) => void>;
-		onClientNotification: jest.Mock<(callback: (method: string, params?: unknown) => Promise<void>) => void>;
+		initialize: Mock<() => Promise<void>>;
+		close: Mock<() => void>;
+		createServer: Mock<() => McpServer>;
+		onToolsChanged: Mock<(callback: () => Promise<void>) => void>;
+		onResourcesChanged: Mock<(callback: () => Promise<void>) => void>;
+		onClientNotification: Mock<(callback: (method: string, params?: unknown) => Promise<void>) => void>;
 	}> = {},
 ): MockMcpBridge {
 	const mock = new MockMcpBridge();

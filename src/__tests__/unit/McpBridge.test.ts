@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Mocked } from "vitest";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import type { ClientManager } from "../../ClientManager.js";
@@ -10,10 +11,10 @@ import { createMockClientManager, createMockResource, createMockTool, wait } fro
 
 describe("McpBridge", () => {
 	let bridge: McpBridge;
-	let mockClientManager: jest.Mocked<ClientManager>;
+	let mockClientManager: Mocked<ClientManager>;
 
 	beforeEach(() => {
-		jest.clearAllMocks();
+		vi.clearAllMocks();
 
 		mockClientManager = createMockClientManager();
 		bridge = new McpBridge(mockClientManager);
@@ -116,7 +117,7 @@ describe("McpBridge", () => {
 
 			// Verify elicitation works before close
 			if (onElicitationCallback) {
-				const mockElicitInput = jest
+				const mockElicitInput = vi
 					.fn<(params: any) => Promise<{ action: string; content?: Record<string, unknown> }>>()
 					.mockResolvedValue({ action: "accept", content: { test: "data" } });
 				(mcpServer.server as any).elicitInput = mockElicitInput;
@@ -303,14 +304,14 @@ describe("McpBridge", () => {
 
 	describe("callback notifications", () => {
 		it("should register tools changed callback", () => {
-			const callback = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const callback = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 			bridge.onToolsChanged(callback);
 			expect(callback).not.toHaveBeenCalled();
 		});
 
 		it("should notify onToolsChanged callbacks when clientManager fires onToolsChanged", async () => {
-			const callback1 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
-			const callback2 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const callback1 = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const callback2 = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 			bridge.onToolsChanged(callback1);
 			bridge.onToolsChanged(callback2);
 
@@ -328,8 +329,8 @@ describe("McpBridge", () => {
 		});
 
 		it("should handle errors in onToolsChanged callbacks", async () => {
-			const errorCallback = jest.fn<() => Promise<void>>().mockRejectedValue(new Error("Callback error"));
-			const successCallback = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const errorCallback = vi.fn<() => Promise<void>>().mockRejectedValue(new Error("Callback error"));
+			const successCallback = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 
 			bridge.onToolsChanged(errorCallback);
 			bridge.onToolsChanged(successCallback);
@@ -345,7 +346,7 @@ describe("McpBridge", () => {
 		});
 
 		it("should notify onResourcesChanged callbacks when clientManager fires onResourcesChanged", async () => {
-			const callback = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const callback = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 			bridge.onResourcesChanged(callback);
 
 			const managerCallback = mockClientManager.onResourcesChanged.mock.calls[0]?.[0];
@@ -358,8 +359,8 @@ describe("McpBridge", () => {
 		});
 
 		it("should notify multiple onResourcesChanged callbacks", async () => {
-			const callback1 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
-			const callback2 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const callback1 = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const callback2 = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 			bridge.onResourcesChanged(callback1);
 			bridge.onResourcesChanged(callback2);
 
@@ -374,9 +375,9 @@ describe("McpBridge", () => {
 		});
 
 		it("should handle errors in onResourcesChanged callbacks", async () => {
-			const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
-			const errorCallback = jest.fn<() => Promise<void>>().mockRejectedValue(new Error("Resources error"));
-			const successCallback = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+			const errorCallback = vi.fn<() => Promise<void>>().mockRejectedValue(new Error("Resources error"));
+			const successCallback = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 			bridge.onResourcesChanged(errorCallback);
 			bridge.onResourcesChanged(successCallback);
 
@@ -413,7 +414,7 @@ describe("McpBridge", () => {
 			// reaches McpBridge via onNotification, it should be a no-op (not forwarded).
 
 			it("should not forward tools/list_changed to onClientNotification callbacks", async () => {
-				const forwardCallback = jest
+				const forwardCallback = vi
 					.fn<(method: string, params?: unknown) => Promise<void>>()
 					.mockResolvedValue(undefined);
 				bridge.onClientNotification(forwardCallback);
@@ -434,7 +435,7 @@ describe("McpBridge", () => {
 			// reaches McpBridge via onNotification, it should be a no-op (not forwarded).
 
 			it("should not forward resources/list_changed to onClientNotification callbacks", async () => {
-				const forwardCallback = jest
+				const forwardCallback = vi
 					.fn<(method: string, params?: unknown) => Promise<void>>()
 					.mockResolvedValue(undefined);
 				bridge.onClientNotification(forwardCallback);
@@ -450,7 +451,7 @@ describe("McpBridge", () => {
 
 		describe("resources/updated notification", () => {
 			it("should not forward resources/updated to onClientNotification callbacks", async () => {
-				const forwardCallback = jest
+				const forwardCallback = vi
 					.fn<(method: string, params?: unknown) => Promise<void>>()
 					.mockResolvedValue(undefined);
 				bridge.onClientNotification(forwardCallback);
@@ -466,7 +467,7 @@ describe("McpBridge", () => {
 
 		describe("custom notification forwarding", () => {
 			it("should forward non-SDK notifications to onClientNotification callbacks", async () => {
-				const forwardCallback = jest
+				const forwardCallback = vi
 					.fn<(method: string, params?: unknown) => Promise<void>>()
 					.mockResolvedValue(undefined);
 				bridge.onClientNotification(forwardCallback);
@@ -480,7 +481,7 @@ describe("McpBridge", () => {
 			});
 
 			it("should forward multiple custom notifications correctly", async () => {
-				const forwardCallback = jest
+				const forwardCallback = vi
 					.fn<(method: string, params?: unknown) => Promise<void>>()
 					.mockResolvedValue(undefined);
 				bridge.onClientNotification(forwardCallback);
@@ -497,9 +498,9 @@ describe("McpBridge", () => {
 			});
 
 			it("should invoke all registered onClientNotification callbacks", async () => {
-				const callback1 = jest.fn<(method: string, params?: unknown) => Promise<void>>().mockResolvedValue(undefined);
-				const callback2 = jest.fn<(method: string, params?: unknown) => Promise<void>>().mockResolvedValue(undefined);
-				const callback3 = jest.fn<(method: string, params?: unknown) => Promise<void>>().mockResolvedValue(undefined);
+				const callback1 = vi.fn<(method: string, params?: unknown) => Promise<void>>().mockResolvedValue(undefined);
+				const callback2 = vi.fn<(method: string, params?: unknown) => Promise<void>>().mockResolvedValue(undefined);
+				const callback3 = vi.fn<(method: string, params?: unknown) => Promise<void>>().mockResolvedValue(undefined);
 
 				bridge.onClientNotification(callback1);
 				bridge.onClientNotification(callback2);
@@ -516,9 +517,9 @@ describe("McpBridge", () => {
 			});
 
 			it("should catch and log errors from forward callbacks", async () => {
-				const consoleErrorSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-				const errorCallback = jest
+				const errorCallback = vi
 					.fn<(method: string, params?: unknown) => Promise<void>>()
 					.mockRejectedValue(new Error("Forward failed"));
 				bridge.onClientNotification(errorCallback);
@@ -540,10 +541,10 @@ describe("McpBridge", () => {
 			});
 
 			it("should continue invoking remaining forward callbacks after one throws", async () => {
-				const errorCallback = jest
+				const errorCallback = vi
 					.fn<(method: string, params?: unknown) => Promise<void>>()
 					.mockRejectedValue(new Error("First forward failed"));
-				const successCallback = jest
+				const successCallback = vi
 					.fn<(method: string, params?: unknown) => Promise<void>>()
 					.mockResolvedValue(undefined);
 
@@ -1160,7 +1161,7 @@ describe("McpBridge", () => {
 			});
 
 			const mcpServer = bridge.createServer();
-			const mockElicitInput = jest
+			const mockElicitInput = vi
 				.fn<(params: any) => Promise<{ action: string; content?: Record<string, unknown> }>>()
 				.mockResolvedValue({
 					action: "accept",
@@ -1227,7 +1228,7 @@ describe("McpBridge", () => {
 			});
 
 			const mcpServer = bridge.createServer();
-			const mockElicitInput = jest
+			const mockElicitInput = vi
 				.fn<(params: any) => Promise<{ action: string; content?: Record<string, unknown> }>>()
 				.mockRejectedValue(new Error("Client disconnected"));
 			(mcpServer.server as any).elicitInput = mockElicitInput;
@@ -1277,7 +1278,7 @@ describe("McpBridge", () => {
 			});
 
 			const mcpServer = bridge.createServer();
-			const mockElicitInput = jest
+			const mockElicitInput = vi
 				.fn<(params: any) => Promise<{ action: string; content?: Record<string, unknown> }>>()
 				.mockResolvedValue({ action: "cancel" });
 			(mcpServer.server as any).elicitInput = mockElicitInput;
@@ -1359,7 +1360,7 @@ describe("createConnectedBridge", () => {
 	});
 
 	it("should handle notification forwarding errors gracefully", async () => {
-		const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+		const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 		const transport = new MockTransport();
 		const bridge = await createConnectedBridge(transport, testConfig);
 

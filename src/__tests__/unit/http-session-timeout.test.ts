@@ -1,35 +1,36 @@
-import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Mock, MockInstance } from "vitest";
 
 import { CLEANUP_INTERVAL_MS, DEFAULT_SESSION_TIMEOUT_MS } from "../../constants.js";
 import { cleanupIdleSessions, type SessionData } from "../../transports/http.js";
 import { createMockBridge } from "../helpers/testUtils.js";
 
 describe("HTTP Session Timeout", () => {
-	let mockDateNow: jest.SpiedFunction<typeof Date.now>;
+	let mockDateNow: MockInstance<typeof Date.now>;
 	let originalSetInterval: typeof setInterval;
 	let originalClearInterval: typeof clearInterval;
 	let intervalCallbacks: Map<NodeJS.Timeout, () => void>;
 	let intervalIds: NodeJS.Timeout[];
 
 	beforeEach(() => {
-		jest.clearAllMocks();
+		vi.clearAllMocks();
 		intervalCallbacks = new Map();
 		intervalIds = [];
 
-		mockDateNow = jest.spyOn(Date, "now");
+		mockDateNow = vi.spyOn(Date, "now");
 		mockDateNow.mockReturnValue(1000000);
 
 		originalSetInterval = globalThis.setInterval;
 		originalClearInterval = globalThis.clearInterval;
 
-		(globalThis as any).setInterval = jest.fn((callback: () => void, _ms: number) => {
+		(globalThis as any).setInterval = vi.fn((callback: () => void, _ms: number) => {
 			const id = { __id: intervalIds.length } as unknown as NodeJS.Timeout;
 			intervalCallbacks.set(id, callback);
 			intervalIds.push(id);
 			return id;
 		});
 
-		(globalThis as any).clearInterval = jest.fn((id: NodeJS.Timeout) => {
+		(globalThis as any).clearInterval = vi.fn((id: NodeJS.Timeout) => {
 			intervalCallbacks.delete(id);
 		});
 	});
@@ -71,7 +72,7 @@ describe("HTTP Session Timeout", () => {
 	describe("Idle session cleanup logic", () => {
 		const createMockSession = (lastActivity: number): SessionData => ({
 			lastActivity,
-			transport: { close: jest.fn() } as any,
+			transport: { close: vi.fn() } as any,
 			server: {} as any,
 		});
 
@@ -152,7 +153,7 @@ describe("HTTP Session Timeout", () => {
 
 	describe("Cleanup interval management", () => {
 		it("should set up periodic cleanup interval", () => {
-			const cleanupCallback = jest.fn();
+			const cleanupCallback = vi.fn();
 			const intervalId = setInterval(cleanupCallback, CLEANUP_INTERVAL_MS);
 
 			expect(globalThis.setInterval).toHaveBeenCalledWith(cleanupCallback, CLEANUP_INTERVAL_MS);
@@ -160,7 +161,7 @@ describe("HTTP Session Timeout", () => {
 		});
 
 		it("should clear cleanup interval on shutdown", () => {
-			const cleanupCallback = jest.fn();
+			const cleanupCallback = vi.fn();
 			const intervalId = setInterval(cleanupCallback, CLEANUP_INTERVAL_MS);
 
 			clearInterval(intervalId);
@@ -169,7 +170,7 @@ describe("HTTP Session Timeout", () => {
 		});
 
 		it("should invoke cleanup callback when interval fires", () => {
-			const cleanupCallback = jest.fn();
+			const cleanupCallback = vi.fn();
 			setInterval(cleanupCallback, CLEANUP_INTERVAL_MS);
 
 			const firstIntervalId = intervalIds[0]!;
@@ -208,7 +209,7 @@ describe("HTTP Session Timeout", () => {
 			const sessions = new Map<string, SessionData>();
 			sessions.set("test-session", {
 				lastActivity: now - 2000,
-				transport: { close: jest.fn() } as any,
+				transport: { close: vi.fn() } as any,
 				server: {} as any,
 			});
 
@@ -276,7 +277,7 @@ describe("HTTP Session Timeout", () => {
 			mockDateNow.mockReturnValue(now);
 			const mockBridge = createMockBridge();
 
-			const closeMock = jest.fn();
+			const closeMock = vi.fn();
 			const mockServer = {} as any;
 			const sessions = new Map<string, SessionData>();
 			sessions.set("idle-session", {
@@ -296,32 +297,32 @@ describe("HTTP Session Timeout", () => {
 	describe("Session registration race condition prevention", () => {
 		interface MockTransport {
 			sessionId: string | null;
-			close: jest.Mock;
+			close: Mock;
 			onclose: (() => void) | null;
 		}
 
-		interface SessionData {
-			server: { connect: jest.Mock };
+		interface TestSessionData {
+			server: { connect: Mock };
 			transport: MockTransport;
 			lastActivity: number;
 		}
 
 		interface CreateSessionResult {
-			sessionData: SessionData;
+			sessionData: TestSessionData;
 			triggerInitialized: (id: string) => void;
 			triggerClose: () => void;
 		}
 
-		const createTestSession = (sessions: Map<string, SessionData>): ((sessionId: string) => CreateSessionResult) => {
+		const createTestSession = (sessions: Map<string, TestSessionData>): ((sessionId: string) => CreateSessionResult) => {
 			return (sessionId: string): CreateSessionResult => {
 				const transport: MockTransport = {
 					sessionId: null,
-					close: jest.fn(),
+					close: vi.fn(),
 					onclose: null,
 				};
 
-				const sessionData: SessionData = {
-					server: { connect: jest.fn() },
+				const sessionData: TestSessionData = {
+					server: { connect: vi.fn() },
 					transport,
 					lastActivity: Date.now(),
 				};
@@ -345,7 +346,7 @@ describe("HTTP Session Timeout", () => {
 		};
 
 		it("should not register session before onsessioninitialized fires", () => {
-			const sessions = new Map<string, SessionData>();
+			const sessions = new Map<string, TestSessionData>();
 			const createSession = createTestSession(sessions);
 
 			const { sessionData, triggerInitialized } = createSession("test-session-id");
@@ -360,7 +361,7 @@ describe("HTTP Session Timeout", () => {
 		});
 
 		it("should not leave zombie sessions when connection fails before initialization", () => {
-			const sessions = new Map<string, SessionData>();
+			const sessions = new Map<string, TestSessionData>();
 			const createSession = createTestSession(sessions);
 
 			createSession("failed-session-id");
@@ -370,7 +371,7 @@ describe("HTTP Session Timeout", () => {
 		});
 
 		it("should clean up session when transport onclose fires", () => {
-			const sessions = new Map<string, SessionData>();
+			const sessions = new Map<string, TestSessionData>();
 			const createSession = createTestSession(sessions);
 
 			const { triggerInitialized, triggerClose } = createSession("session-to-close");
@@ -384,7 +385,7 @@ describe("HTTP Session Timeout", () => {
 		});
 
 		it("should handle onclose gracefully when session was never registered", () => {
-			const sessions = new Map<string, SessionData>();
+			const sessions = new Map<string, TestSessionData>();
 			const createSession = createTestSession(sessions);
 
 			const { triggerClose } = createSession("unregistered-session");
@@ -394,7 +395,7 @@ describe("HTTP Session Timeout", () => {
 		});
 
 		it("should allow session data to be used before registration completes", () => {
-			const sessions = new Map<string, SessionData>();
+			const sessions = new Map<string, TestSessionData>();
 			const createSession = createTestSession(sessions);
 
 			const { sessionData, triggerInitialized } = createSession("new-session");

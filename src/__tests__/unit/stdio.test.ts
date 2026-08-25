@@ -1,24 +1,25 @@
-import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { MockInstance } from "vitest";
 
 import { MockMcpBridge } from "../helpers/MockMcpBridge.js";
 
-const logMock = jest.fn();
+const logMock = vi.fn();
 
 describe("stdio transport", () => {
-	let processOnSpy: jest.SpiedFunction<typeof process.on>;
-	let processExitSpy: jest.SpiedFunction<typeof process.exit>;
+	let processOnSpy: MockInstance<typeof process.on>;
+	let processExitSpy: MockInstance<typeof process.exit>;
 	let mockBridge: MockMcpBridge;
 	let signalHandlers: Map<string, (() => void)[]>;
-	let stdinOnSpy: jest.SpiedFunction<typeof process.stdin.on>;
+	let stdinOnSpy: MockInstance<typeof process.stdin.on>;
 	let stdinHandlers: Map<string, (() => void)[]>;
 
 	beforeEach(() => {
-		jest.clearAllMocks();
+		vi.clearAllMocks();
 		signalHandlers = new Map();
 		mockBridge = new MockMcpBridge();
 
 		// Spy on process.on to capture signal handlers
-		processOnSpy = jest.spyOn(process, "on").mockImplementation((event: string | symbol, handler: () => void) => {
+		processOnSpy = vi.spyOn(process, "on").mockImplementation((event: string | symbol, handler: () => void) => {
 			const eventKey = String(event);
 			if (!signalHandlers.has(eventKey)) {
 				signalHandlers.set(eventKey, []);
@@ -30,7 +31,7 @@ describe("stdio transport", () => {
 		stdinHandlers = new Map();
 
 		// Spy on process.stdin.on to capture stdin event handlers
-		stdinOnSpy = jest
+		stdinOnSpy = vi
 			.spyOn(process.stdin, "on")
 			.mockImplementation((event: string | symbol, handler: () => void) => {
 				const eventKey = String(event);
@@ -42,7 +43,7 @@ describe("stdio transport", () => {
 			});
 
 		// Spy on process.exit to prevent actual exit
-		processExitSpy = jest.spyOn(process, "exit").mockImplementation((() => {
+		processExitSpy = vi.spyOn(process, "exit").mockImplementation((() => {
 			// Do nothing
 		}) as any);
 	});
@@ -54,10 +55,10 @@ describe("stdio transport", () => {
 	});
 
 	const setupModule = async (): Promise<typeof import("../../transports/stdio.js")> => {
-		jest.resetModules();
+		vi.resetModules();
 		logMock.mockClear();
 
-		jest.unstable_mockModule("../../utils.js", () => ({
+		vi.doMock("../../utils.js", () => ({
 			log: {
 				error: logMock,
 				warn: logMock,
@@ -66,14 +67,15 @@ describe("stdio transport", () => {
 			},
 		}));
 
-		jest.unstable_mockModule("@modelcontextprotocol/sdk/server/stdio.js", () => ({
-			StdioServerTransport: jest.fn().mockImplementation(() => ({
-				// Mock transport
-			})),
+		vi.doMock("@modelcontextprotocol/sdk/server/stdio.js", () => ({
+			// Regular function so the spy is constructable with `new` (arrow implementations are not)
+			StdioServerTransport: vi.fn(function () {
+				return {}; // Mock transport
+			}),
 		}));
 
-		jest.unstable_mockModule("../../McpBridge.js", () => ({
-			createConnectedBridge: jest.fn<() => Promise<MockMcpBridge>>().mockResolvedValue(mockBridge),
+		vi.doMock("../../McpBridge.js", () => ({
+			createConnectedBridge: vi.fn<() => Promise<MockMcpBridge>>().mockResolvedValue(mockBridge),
 		}));
 
 		return await import("../../transports/stdio.js");

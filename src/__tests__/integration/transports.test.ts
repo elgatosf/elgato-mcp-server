@@ -1,14 +1,15 @@
-import { beforeEach, describe, expect, it, jest } from "@jest/globals";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Mocked } from "vitest";
 
 import type { ClientManager } from "../../ClientManager.js";
 import { McpBridge } from "../../McpBridge.js";
 import { createMockClientManager, createMockResource, createMockTool, wait } from "../helpers/testUtils.js";
 
 describe("Transport Integration Tests", () => {
-	let mockClientManager: jest.Mocked<ClientManager>;
+	let mockClientManager: Mocked<ClientManager>;
 
 	beforeEach(() => {
-		jest.clearAllMocks();
+		vi.clearAllMocks();
 		mockClientManager = createMockClientManager();
 	});
 
@@ -69,8 +70,8 @@ describe("Transport Integration Tests", () => {
 			const bridge = new McpBridge(mockClientManager);
 			await bridge.initialize();
 
-			const callback1 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
-			const callback2 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const callback1 = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const callback2 = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 
 			bridge.onToolsChanged(callback1);
 			bridge.onToolsChanged(callback2);
@@ -93,8 +94,8 @@ describe("Transport Integration Tests", () => {
 			const bridge = new McpBridge(mockClientManager);
 			await bridge.initialize();
 
-			const callback1 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
-			const callback2 = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const callback1 = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const callback2 = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 
 			bridge.onResourcesChanged(callback1);
 			bridge.onResourcesChanged(callback2);
@@ -199,7 +200,7 @@ describe("Transport Integration Tests", () => {
 			mockClientManager = createMockClientManager({ isConnected: false });
 
 			const bridge = new McpBridge(mockClientManager);
-			const callback = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+			const callback = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 			bridge.onToolsChanged(callback);
 
 			await bridge.initialize();
