@@ -18,13 +18,8 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import { ClientManager } from "./ClientManager.js";
-import {
-	BRIDGE_STATUS_TOOL,
-	NO_APPS_CONNECTED_MESSAGE,
-	SDK_NOTIFICATIONS,
-	SERVER_INSTRUCTIONS,
-	STATIC_PROMPTS,
-} from "./constants.js";
+import { BRIDGE_STATUS_TOOL, NO_APPS_CONNECTED_MESSAGE, SDK_NOTIFICATIONS, SERVER_INSTRUCTIONS } from "./constants.js";
+import { loadPrompts, type PromptDefinition, renderPrompt, toPromptDescriptor } from "./prompts.js";
 import type { ClientManagerConfig, ElicitationParams } from "./types.js";
 import { log } from "./utils.js";
 
@@ -42,6 +37,8 @@ export class McpBridge {
 	private notificationForwardCallbacks: Array<(method: string, params?: unknown) => Promise<void>> = [];
 	private notifyResourcesChangedCallbacks: Array<() => Promise<void>> = [];
 	private notifyToolsChangedCallbacks: Array<() => Promise<void>> = [];
+	/** Prompt definitions loaded from the prompts directory at startup. */
+	private readonly prompts: PromptDefinition[];
 	private resourceSubscriptions: Map<McpServer, Set<string>> = new Map();
 
 	/**
@@ -50,6 +47,7 @@ export class McpBridge {
 	 */
 	public constructor(clientManager?: ClientManager) {
 		this.clientManager = clientManager ?? new ClientManager();
+		this.prompts = loadPrompts();
 		this.setupClientManagerCallbacks();
 	}
 
@@ -341,46 +339,19 @@ export class McpBridge {
 			}
 		});
 
-		// Prompt handlers (static prompts served by the bridge itself, for testing MCP client prompt support)
+		// Prompt handlers (prompts loaded from the package's prompts directory at startup)
 		server.setRequestHandler(ListPromptsRequestSchema, (): ListPromptsResult => {
-			return { prompts: STATIC_PROMPTS };
+			return { prompts: this.prompts.map(toPromptDescriptor) };
 		});
 
 		server.setRequestHandler(GetPromptRequestSchema, (request): GetPromptResult => {
 			const { name, arguments: args } = request.params;
 
-			switch (name) {
-				case "bridge_status_check":
-					return {
-						description: "Check the Elgato MCP bridge status.",
-						messages: [
-							{
-								role: "user",
-								content: {
-									type: "text",
-									text: "Check the status of the Elgato MCP bridge and summarize which apps are connected and what tools are available.",
-								},
-							},
-						],
-					};
-				case "greet": {
-					const who = args?.name ?? "the world";
-					return {
-						description: "Greet someone in a fun way.",
-						messages: [
-							{
-								role: "user",
-								content: {
-									type: "text",
-									text: `Say hello to ${who} in a fun way.`,
-								},
-							},
-						],
-					};
-				}
-				default:
-					throw new Error(`Unknown prompt: ${name}`);
+			const prompt = this.prompts.find((p) => p.name === name);
+			if (!prompt) {
+				throw new Error(`Unknown prompt: ${name}`);
 			}
+			return renderPrompt(prompt, args);
 		});
 
 		// Resource handlers

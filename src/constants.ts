@@ -1,4 +1,4 @@
-import type { Prompt, Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -110,32 +110,11 @@ export const BRIDGE_STATUS_TOOL: Tool = {
 /** Server instructions surfaced to MCP clients (temporary, for testing prompt support in MCP clients). */
 export const SERVER_INSTRUCTIONS = `This server bridges Elgato apps (e.g. Stream Deck) to MCP clients.
 
-It exposes two static prompts:
+It exposes prompts loaded from its prompts folder, including:
 - "bridge_status_check": use when the user wants to know whether Elgato apps are connected and which tools are available. Takes no arguments.
 - "greet": produces a fun greeting. Accepts an optional "name" argument for who to greet; if omitted, greets the world.
 
 Prefer these prompts as ready-made starting points instead of composing equivalent requests manually.`;
-
-/** Static prompts served by the bridge itself (temporary, for testing prompt support in MCP clients). */
-export const STATIC_PROMPTS: Prompt[] = [
-	{
-		name: "bridge_status_check",
-		title: "Check Bridge Status",
-		description: "Summarize which Elgato apps are connected to the bridge and what tools are available.",
-	},
-	{
-		name: "greet",
-		title: "Greet Someone",
-		description: "Say hello to someone in a fun way.",
-		arguments: [
-			{
-				name: "name",
-				description: "Who to greet",
-				required: false,
-			},
-		],
-	},
-];
 
 /** MCP error codes. */
 export const MCP_ERROR_CODES = {

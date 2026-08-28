@@ -1,0 +1,6 @@
+{
+	"name": "bridge_status_check",
+	"title": "Check Bridge Status",
+	"description": "Summarize which Elgato apps are connected to the bridge and what tools are available.",
+	"template": "Check the status of the Elgato MCP bridge and summarize which apps are connected and what tools are available."
+}

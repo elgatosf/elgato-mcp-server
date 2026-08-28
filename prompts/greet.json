@@ -1,0 +1,14 @@
+{
+	"name": "greet",
+	"title": "Greet Someone",
+	"description": "Say hello to someone in a fun way.",
+	"arguments": [
+		{
+			"name": "name",
+			"description": "Who to greet",
+			"required": false,
+			"default": "the world"
+		}
+	],
+	"template": "Say hello to {name} in a fun way."
+}
