@@ -3,6 +3,10 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
 	CallToolRequestSchema,
 	type CallToolResult,
+	GetPromptRequestSchema,
+	type GetPromptResult,
+	ListPromptsRequestSchema,
+	type ListPromptsResult,
 	ListResourcesRequestSchema,
 	type ListResourcesResult,
 	ListToolsRequestSchema,
@@ -14,7 +18,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import { ClientManager } from "./ClientManager.js";
-import { BRIDGE_STATUS_TOOL, NO_APPS_CONNECTED_MESSAGE, SDK_NOTIFICATIONS } from "./constants.js";
+import { BRIDGE_STATUS_TOOL, NO_APPS_CONNECTED_MESSAGE, SDK_NOTIFICATIONS, STATIC_PROMPTS } from "./constants.js";
 import type { ClientManagerConfig, ElicitationParams } from "./types.js";
 import { log } from "./utils.js";
 
@@ -77,6 +81,7 @@ export class McpBridge {
 				capabilities: {
 					tools: { listChanged: true },
 					resources: { subscribe: true, listChanged: true },
+					prompts: {},
 				},
 			},
 		);
@@ -326,6 +331,48 @@ export class McpBridge {
 			} finally {
 				// Clear the McpServer reference when the tool call completes
 				this.activeToolCalls.delete(correlationId);
+			}
+		});
+
+		// Prompt handlers (static prompts served by the bridge itself, for testing MCP client prompt support)
+		server.setRequestHandler(ListPromptsRequestSchema, (): ListPromptsResult => {
+			return { prompts: STATIC_PROMPTS };
+		});
+
+		server.setRequestHandler(GetPromptRequestSchema, (request): GetPromptResult => {
+			const { name, arguments: args } = request.params;
+
+			switch (name) {
+				case "bridge_status_check":
+					return {
+						description: "Check the Elgato MCP bridge status.",
+						messages: [
+							{
+								role: "user",
+								content: {
+									type: "text",
+									text: "Check the status of the Elgato MCP bridge and summarize which apps are connected and what tools are available.",
+								},
+							},
+						],
+					};
+				case "greet": {
+					const who = args?.name ?? "the world";
+					return {
+						description: "Greet someone in a fun way.",
+						messages: [
+							{
+								role: "user",
+								content: {
+									type: "text",
+									text: `Say hello to ${who} in a fun way.`,
+								},
+							},
+						],
+					};
+				}
+				default:
+					throw new Error(`Unknown prompt: ${name}`);
 			}
 		});
 
