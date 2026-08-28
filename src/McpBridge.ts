@@ -18,7 +18,13 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import { ClientManager } from "./ClientManager.js";
-import { BRIDGE_STATUS_TOOL, NO_APPS_CONNECTED_MESSAGE, SDK_NOTIFICATIONS, STATIC_PROMPTS } from "./constants.js";
+import {
+	BRIDGE_STATUS_TOOL,
+	NO_APPS_CONNECTED_MESSAGE,
+	SDK_NOTIFICATIONS,
+	SERVER_INSTRUCTIONS,
+	STATIC_PROMPTS,
+} from "./constants.js";
 import type { ClientManagerConfig, ElicitationParams } from "./types.js";
 import { log } from "./utils.js";
 
@@ -83,6 +89,7 @@ export class McpBridge {
 					resources: { subscribe: true, listChanged: true },
 					prompts: {},
 				},
+				instructions: SERVER_INSTRUCTIONS,
 			},
 		);
 

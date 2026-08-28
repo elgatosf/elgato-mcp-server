@@ -107,6 +107,15 @@ export const BRIDGE_STATUS_TOOL: Tool = {
 	},
 };
 
+/** Server instructions surfaced to MCP clients (temporary, for testing prompt support in MCP clients). */
+export const SERVER_INSTRUCTIONS = `This server bridges Elgato apps (e.g. Stream Deck) to MCP clients.
+
+It exposes two static prompts:
+- "bridge_status_check": use when the user wants to know whether Elgato apps are connected and which tools are available. Takes no arguments.
+- "greet": produces a fun greeting. Accepts an optional "name" argument for who to greet; if omitted, greets the world.
+
+Prefer these prompts as ready-made starting points instead of composing equivalent requests manually.`;
+
 /** Static prompts served by the bridge itself (temporary, for testing prompt support in MCP clients). */
 export const STATIC_PROMPTS: Prompt[] = [
 	{
