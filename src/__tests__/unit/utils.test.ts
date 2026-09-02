@@ -4,6 +4,7 @@ import type { Resource, Tool } from "@modelcontextprotocol/sdk/types.js";
 import {
 	convertToMcpResources,
 	convertToMcpTools,
+	isPlainObject,
 	log,
 	parseCliArgs,
 	printHelp,
@@ -240,6 +241,21 @@ describe("utils", () => {
 			const result = convertToMcpResources([mcpResource]);
 
 			expect(result[0]?._meta).toEqual({ custom: "data", version: 2 });
+		});
+	});
+
+	describe("isPlainObject", () => {
+		it("should accept plain objects", () => {
+			expect(isPlainObject({})).toBe(true);
+			expect(isPlainObject({ a: 1 })).toBe(true);
+		});
+
+		it("should reject null, arrays and primitives", () => {
+			expect(isPlainObject(null)).toBe(false);
+			expect(isPlainObject(undefined)).toBe(false);
+			expect(isPlainObject([1, 2])).toBe(false);
+			expect(isPlainObject("str")).toBe(false);
+			expect(isPlainObject(42)).toBe(false);
 		});
 	});
 

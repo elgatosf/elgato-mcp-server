@@ -397,6 +397,27 @@ describe("IpcClient", () => {
 			expect(result.result).toEqual({ success: true });
 		});
 
+		it("should forward request _meta on callTool when provided", async () => {
+			const meta = { progressToken: 7, "custom/tag": "abc" };
+			const requestPromise = client.callTool("test_tool", { a: 1 }, undefined, meta);
+
+			const req = JSON.parse(mockSocket.getWrittenData()[0] ?? "{}");
+			expect(req._meta).toEqual(meta);
+
+			mockSocket.simulateData(JSON.stringify({ id: req.id, result: {} }) + "\n");
+			await requestPromise;
+		});
+
+		it("should omit the _meta key from callTool when not provided", async () => {
+			const requestPromise = client.callTool("test_tool", { a: 1 });
+
+			const req = JSON.parse(mockSocket.getWrittenData()[0] ?? "{}");
+			expect("_meta" in req).toBe(false);
+
+			mockSocket.simulateData(JSON.stringify({ id: req.id, result: {} }) + "\n");
+			await requestPromise;
+		});
+
 		it("should throw error when calling methods while disconnected", async () => {
 			client.disconnect();
 
@@ -472,8 +493,52 @@ describe("IpcClient", () => {
 			};
 			mockSocket.simulateData(JSON.stringify({ id: req.id, result: resourceContent }) + "\n");
 
-			const result = await requestPromise;
-			expect(result).toEqual(resourceContent);
+			const outcome = await requestPromise;
+			expect(outcome.result).toEqual(resourceContent);
+			expect(outcome._meta).toBeUndefined();
+		});
+
+		it("should surface envelope _meta from a readResource response", async () => {
+			const requestPromise = client.readResource("streamdeck://test/resource");
+
+			const req = JSON.parse(mockSocket.getWrittenData()[0] ?? "{}");
+			// `_meta` is a sibling of `result` on the wire, never inside it.
+			mockSocket.simulateData(
+				JSON.stringify({
+					id: req.id,
+					result: { uri: "u", mimeType: "application/json", content: {} },
+					_meta: { cachedAt: "2026-09-02" },
+				}) + "\n",
+			);
+
+			const outcome = await requestPromise;
+			expect(outcome._meta).toEqual({ cachedAt: "2026-09-02" });
+			expect(outcome.result).toEqual({ uri: "u", mimeType: "application/json", content: {} });
+		});
+
+		it("should forward request _meta on readResource when provided", async () => {
+			const meta = { progressToken: "p-1" };
+			const requestPromise = client.readResource("streamdeck://test/resource", meta);
+
+			const req = JSON.parse(mockSocket.getWrittenData()[0] ?? "{}");
+			expect(req._meta).toEqual(meta);
+
+			mockSocket.simulateData(
+				JSON.stringify({ id: req.id, result: { uri: "u", mimeType: "application/json", content: {} } }) + "\n",
+			);
+			await requestPromise;
+		});
+
+		it("should omit the _meta key from readResource when not provided", async () => {
+			const requestPromise = client.readResource("streamdeck://test/resource");
+
+			const req = JSON.parse(mockSocket.getWrittenData()[0] ?? "{}");
+			expect("_meta" in req).toBe(false);
+
+			mockSocket.simulateData(
+				JSON.stringify({ id: req.id, result: { uri: "u", mimeType: "application/json", content: {} } }) + "\n",
+			);
+			await requestPromise;
 		});
 
 		it("should handle error responses from readResource", async () => {

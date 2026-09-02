@@ -33,6 +33,8 @@ export interface CallToolRequest extends RequestBase {
 	method: "call_tool";
 	toolName: string;
 	arguments: Record<string, unknown>;
+	/** Request metadata forwarded verbatim from the MCP client (e.g. `progressToken`). Omitted when the client sent none. */
+	_meta?: Record<string, unknown>;
 }
 
 /**
@@ -48,6 +50,8 @@ export interface ResourcesListRequest extends RequestBase {
 export interface ResourcesReadRequest extends RequestBase {
 	method: "resources_read";
 	uri: string;
+	/** Request metadata forwarded verbatim from the MCP client. Omitted when the client sent none. */
+	_meta?: Record<string, unknown>;
 }
 
 /**
@@ -128,6 +132,11 @@ export interface ResponseBase {
 	id: string;
 	result?: unknown;
 	error?: McpError;
+	/**
+	 * Response metadata from the app, a sibling of `result` on the wire; surfaced as
+	 * top-level `_meta` on the MCP result.
+	 */
+	_meta?: Record<string, unknown>;
 }
 
 /**
@@ -205,6 +214,16 @@ export interface ResourcesReadResult {
 }
 
 /**
+ * A `resources_read` result together with its response-envelope `_meta`.
+ * Keeping `_meta` outside `result` mirrors the wire shape and stops it being
+ * dropped when callers re-shape the result (e.g. re-prefixing the URI).
+ */
+export interface ResourcesReadOutcome {
+	result: ResourcesReadResult;
+	_meta?: Record<string, unknown>;
+}
+
+/**
  * Resources read response.
  */
 export interface ResourcesReadResponse extends ResponseBase {
@@ -253,6 +272,8 @@ export interface ElicitationParams {
 	requestedSchema: Record<string, unknown>;
 	/** The ID of the related tool call, used to route elicitations to the correct MCP session. */
 	relatedToolCallId: string;
+	/** Request metadata from the app, forwarded to the MCP client on the elicitation request. */
+	_meta?: Record<string, unknown>;
 }
 
 /**
@@ -275,6 +296,8 @@ export interface ElicitationRequest {
 export interface ElicitationResponse {
 	action: "accept" | "cancel" | "decline";
 	content?: Record<string, unknown>;
+	/** Response metadata from the MCP client, per the spec's `ElicitResult extends Result`. */
+	_meta?: Record<string, unknown>;
 }
 
 /**

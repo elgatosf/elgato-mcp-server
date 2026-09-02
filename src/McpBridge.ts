@@ -3,6 +3,7 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
 	CallToolRequestSchema,
 	type CallToolResult,
+	type ElicitRequestFormParams,
 	ListResourcesRequestSchema,
 	type ListResourcesResult,
 	ListToolsRequestSchema,
@@ -16,7 +17,7 @@ import {
 import { ClientManager } from "./ClientManager.js";
 import { BRIDGE_STATUS_TOOL, NO_APPS_CONNECTED_MESSAGE, SDK_NOTIFICATIONS } from "./constants.js";
 import type { ClientManagerConfig, ElicitationParams } from "./types.js";
-import { log } from "./utils.js";
+import { isPlainObject, log } from "./utils.js";
 
 /**
  * Bridge between MCP protocol and IPC-connected apps.
@@ -240,7 +241,7 @@ export class McpBridge {
 		});
 
 		server.setRequestHandler(CallToolRequestSchema, async (request, extra): Promise<CallToolResult> => {
-			const { name, arguments: args = {} } = request.params;
+			const { name, arguments: args = {}, _meta: requestMeta } = request.params;
 
 			// The status tool is served by the bridge itself so it works with no apps connected.
 			if (name === BRIDGE_STATUS_TOOL.name) {
@@ -262,7 +263,7 @@ export class McpBridge {
 			this.activeToolCalls.set(correlationId, mcpServer);
 
 			try {
-				const response = await this.clientManager.callTool(name, args, correlationId);
+				const response = await this.clientManager.callTool(name, args, correlationId, requestMeta);
 
 				if (response.error) {
 					return {
@@ -271,11 +272,25 @@ export class McpBridge {
 					};
 				}
 
+				// `_meta` rides the response envelope as a sibling of `result`, never inside it,
+				// so the tool's payload is passed through untouched. The spec types `Result._meta`
+				// as an object and strict clients reject the whole result otherwise, so a
+				// non-object from the wire is dropped rather than forwarded.
+				let metaFields: { _meta?: Record<string, unknown> } = {};
+				if (response._meta !== undefined) {
+					if (isPlainObject(response._meta)) {
+						metaFields = { _meta: response._meta };
+					} else {
+						log.debug(`Dropping non-object _meta from "${name}" response`);
+					}
+				}
+
 				const result = response.result;
 				if (result?.error) {
 					return {
 						content: [{ type: "text", text: result.error }],
 						isError: true,
+						...metaFields,
 					};
 				}
 
@@ -289,7 +304,7 @@ export class McpBridge {
 				// `structuredContent` must be a plain JSON object (outputSchema is always
 				// `type: "object"` at the top level), so only emit it when the result qualifies.
 				if (tool?.outputSchema !== undefined) {
-					if (result === null || typeof result !== "object" || Array.isArray(result)) {
+					if (!isPlainObject(result)) {
 						// A success result without structuredContent would make strict clients
 						// fail with an opaque protocol error; a tool error (which the spec does
 						// not require structuredContent on) is diagnosable instead.
@@ -308,7 +323,8 @@ export class McpBridge {
 						// containing the JSON-serialized structured payload, for clients that
 						// do not support structured output.
 						content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-						structuredContent: result as Record<string, unknown>,
+						structuredContent: result,
+						...metaFields,
 					};
 				}
 
@@ -316,6 +332,7 @@ export class McpBridge {
 				// serialize the IPC result into a single text block.
 				return {
 					content: [{ type: "text", text: JSON.stringify(result ?? null, null, 2) }],
+					...metaFields,
 				};
 			} catch (error) {
 				const message = error instanceof Error ? error.message : "Unknown error";
@@ -338,14 +355,14 @@ export class McpBridge {
 		});
 
 		server.setRequestHandler(ReadResourceRequestSchema, async (request): Promise<ReadResourceResult> => {
-			const { uri } = request.params;
+			const { uri, _meta: requestMeta } = request.params;
 
 			if (!this.clientManager.isConnected) {
 				throw new Error(NO_APPS_CONNECTED_MESSAGE);
 			}
 
 			try {
-				const result = await this.clientManager.readResource(uri);
+				const { result, _meta } = await this.clientManager.readResource(uri, requestMeta);
 				// Convert IPC format (single resource with content object)
 				// to MCP format (contents array with text/blob)
 				const contents = [
@@ -355,7 +372,9 @@ export class McpBridge {
 						text: JSON.stringify(result.content),
 					},
 				];
-				return { contents };
+				// Envelope `_meta` belongs on the result, never inside the `contents` items.
+				// Non-object values are dropped for the same reason as on the tool-call path.
+				return { contents, ...(isPlainObject(_meta) && { _meta }) };
 			} catch (error) {
 				const message = error instanceof Error ? error.message : "Unknown error";
 				throw new Error(message);
@@ -439,13 +458,18 @@ export class McpBridge {
 					message: params.message,
 					// eslint-disable-next-line @typescript-eslint/no-explicit-any
 					requestedSchema: params.requestedSchema as any,
+					// The SDK types `_meta.progressToken` narrowly; the app supplies opaque metadata.
+					...(params._meta !== undefined && { _meta: params._meta as ElicitRequestFormParams["_meta"] }),
 				});
 
 				log.debug(`Elicitation result from MCP client: ${result}`);
 
+				// Per the spec's `ElicitResult extends Result`, the client may attach its own
+				// `_meta`; hand it back to the app inside the elicitation/response result.
 				return {
 					action: result.action,
 					content: result.content,
+					...(result._meta !== undefined && { _meta: result._meta }),
 				};
 			} catch (error) {
 				const message = error instanceof Error ? error.message : "Unknown error";

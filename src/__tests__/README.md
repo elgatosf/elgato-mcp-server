@@ -8,17 +8,17 @@ This directory contains comprehensive test coverage for the Elgato MCP Server pr
 | ----------- | ------------------------- |
 | Build       | ✅ Passing                |
 | Test Suites | 12 of 12 passing (100%)   |
-| Tests       | 320 of 320 passing (100%) |
+| Tests       | 343 of 343 passing (100%) |
 | Skipped     | 0 tests                   |
 
 ### Coverage Metrics
 
 | Metric     | Coverage | Threshold |
 | ---------- | -------- | --------- |
-| Statements | 88.91%   | 80% ✅    |
-| Branches   | 83.27%   | 80% ✅    |
-| Functions  | 89.88%   | 80% ✅    |
-| Lines      | 89.23%   | 80% ✅    |
+| Statements | 89.00%   | 80% ✅    |
+| Branches   | 84.08%   | 80% ✅    |
+| Functions  | 89.94%   | 80% ✅    |
+| Lines      | 89.32%   | 80% ✅    |
 
 ## Test Structure
 
@@ -32,16 +32,16 @@ src/__tests__/
 │   └── testUtils.ts                      # Helper functions for creating test data
 ├── unit/                                 # Unit tests (8 test files, 253 tests)
 │   ├── constants.test.ts                 # Socket path generation tests (6 tests)
-│   ├── utils.test.ts                     # Utility functions tests (43 tests)
-│   ├── IpcClient.test.ts                 # IPC client tests (69 tests, includes elicitation)
-│   ├── ClientManager.test.ts             # Client manager aggregation tests (43 tests)
-│   ├── McpBridge.test.ts                 # MCP bridge logic tests (56 tests, includes elicitation)
+│   ├── utils.test.ts                     # Utility functions tests (45 tests)
+│   ├── IpcClient.test.ts                 # IPC client tests (74 tests, includes elicitation)
+│   ├── ClientManager.test.ts             # Client manager aggregation tests (45 tests)
+│   ├── McpBridge.test.ts                 # MCP bridge logic tests (69 tests, includes elicitation)
 │   ├── stdio.test.ts                     # stdio transport lifecycle tests (10 tests)
 │   ├── http-server-startup.test.ts       # HTTP server initialization tests (5 tests)
 │   └── http-session-timeout.test.ts      # HTTP session timeout tests (21 tests)
 └── integration/                          # Integration tests (4 test files, 67 tests)
     ├── transports.test.ts                # Stdio and HTTP transport tests
-    ├── mcp-protocol.test.ts              # MCP protocol endpoint tests (31 tests)
+    ├── mcp-protocol.test.ts              # MCP protocol endpoint tests (32 tests)
     ├── http-cors.test.ts                 # CORS handling tests
     └── http-session-lifecycle.test.ts    # Session lifecycle tests
 ```
@@ -70,7 +70,7 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Default server info validation
 - Log prefix validation
 
-#### utils.test.ts (43 tests)
+#### utils.test.ts (45 tests)
 
 - Tool conversion with various input formats
 - Schema transformation correctness
@@ -80,8 +80,9 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Help message generation
 - Logging functionality
 - Resource conversion (`convertToMcpResources`)
+- Plain-object classification (`isPlainObject`)
 
-#### IpcClient.test.ts (69 tests)
+#### IpcClient.test.ts (74 tests)
 
 - Connection lifecycle (connect, disconnect, timeout, errors)
 - Message parsing and buffer processing
@@ -95,9 +96,11 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Signal listener functionality
 - Notification handling (type guards, multiple callbacks, error isolation)
 - Resources API (getResources, readResource)
+- Request `_meta` forwarding on `call_tool` / `resources_read`, and omission of the key when absent
+- Envelope `_meta` (sibling of `result`) surfacing on the `resources_read` outcome
 - Elicitation handling (type guard, callback registration, response handling, timeout, error handling)
 
-#### ClientManager.test.ts (43 tests)
+#### ClientManager.test.ts (45 tests)
 
 - Multi-client aggregation of tools and resources
 - `appname__` prefix application and stripping
@@ -105,8 +108,9 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Forwarding of onToolsChanged / onResourcesChanged / onNotification / onElicitation callbacks
 - Handling connected/disconnected client states
 - URI prefixing in RESOURCES_UPDATED notifications for subscription matching
+- Pass-through of request `_meta` to the owning client, and of envelope `_meta` back to the caller across URI re-prefixing
 
-#### McpBridge.test.ts (56 tests)
+#### McpBridge.test.ts (69 tests)
 
 - Initialization (connected and disconnected modes)
 - Server creation with custom info
@@ -118,6 +122,12 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Resource subscription tracking and forwarding
 - Helper functions (createInitializedBridge, createConnectedBridge)
 - Elicitation forwarding (callback registration, decline when no active server)
+- `_meta` proxying: request metadata reaching the client manager, and envelope metadata surfaced
+  as top-level `_meta` on the MCP result across the `outputSchema`, legacy and tool-error paths —
+  including that a non-object envelope `_meta` is dropped, and that a tool payload's own `_meta`
+  key survives into `structuredContent` untouched
+- Elicitation `_meta` round-trip: `params._meta` reaching `elicitInput`, `ElicitResult._meta`
+  returning on the IPC response, and neither key appearing when absent
 
 #### http-server-startup.test.ts (5 tests)
 
@@ -157,7 +167,7 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Reconnection handling
 - Callback notifications on reconnection
 
-#### mcp-protocol.test.ts (31 tests)
+#### mcp-protocol.test.ts (32 tests)
 
 - tools/list endpoint (cached tools, built-in bridge_status tool, refresh)
 - tools/call endpoint (success, errors, disconnected state, bridge_status when connected/disconnected)
@@ -167,6 +177,9 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Error handling (network, malformed, timeout)
 - Reconnection scenarios (success, failure, tool updates)
 - Resources via MockTransport (list, read, subscribe, unsubscribe endpoints)
+- `_meta` round-trip over the full stack — a real ClientManager and IpcClient on a MockSocket, so
+  the request metadata is asserted on the actual IPC wire frame and the response envelope's
+  `_meta` is asserted to surface without polluting `structuredContent`
 
 #### http-cors.test.ts
 

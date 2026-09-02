@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClientManager } from "../../ClientManager.js";
 import type { IpcClientFactory } from "../../ClientManager.js";
 import { SDK_NOTIFICATIONS } from "../../constants.js";
-import type { CallToolResponse, ClientManagerConfig, IpcClientConfig, ResourcesReadResult } from "../../types.js";
+import type { CallToolResponse, ClientManagerConfig, IpcClientConfig, ResourcesReadOutcome } from "../../types.js";
 import { createMockClient, createMockResource, createMockServerInfo, createMockTool } from "../helpers/testUtils.js";
 
 /**
@@ -406,7 +406,7 @@ describe("ClientManager", () => {
 			const result = await manager.callTool("app1__toggle_light", { brightness: 100 }, "req-123");
 
 			// Verify correct client was called with stripped prefix
-			expect(callToolMockClient1.callTool).toHaveBeenCalledWith("toggle_light", { brightness: 100 }, "req-123");
+			expect(callToolMockClient1.callTool).toHaveBeenCalledWith("toggle_light", { brightness: 100 }, "req-123", undefined);
 			expect(result).toBe(expectedResponse);
 
 			// Verify the other client was NOT called (multi-client routing discrimination)
@@ -428,10 +428,26 @@ describe("ClientManager", () => {
 
 			const result = await mgr.callTool("myapp__my_tool", { key: "val" }, "req-1");
 
-			expect(mockClient.callTool).toHaveBeenCalledWith("my_tool", { key: "val" }, "req-1");
+			expect(mockClient.callTool).toHaveBeenCalledWith("my_tool", { key: "val" }, "req-1", undefined);
 			expect(result).toBe(response);
 
 			mgr.close();
+		});
+
+		it("should forward request _meta to the owning client unmodified", async () => {
+			const meta = { progressToken: 42 };
+			callToolMockClient1.callTool.mockResolvedValue({ id: "1", result: {} } satisfies CallToolResponse);
+
+			await manager.callTool("app1__toggle_light", { brightness: 100 }, "req-123", meta);
+
+			expect(callToolMockClient1.callTool).toHaveBeenCalledWith(
+				"toggle_light",
+				{ brightness: 100 },
+				"req-123",
+				meta,
+			);
+			// The metadata object is passed through by reference, not copied or rewritten.
+			expect(callToolMockClient1.callTool.mock.calls[0]?.[3]).toBe(meta);
 		});
 
 		it("should throw for an unknown tool name", async () => {
@@ -465,7 +481,9 @@ describe("ClientManager", () => {
 	describe("readResource", () => {
 		it("should route prefixed URI to the correct client and re-prefix result", async () => {
 			const mockClient = createMockClient({ isConnected: true });
-			const rawResult: ResourcesReadResult = { uri: "device://status", mimeType: "application/json", content: {} };
+			const rawResult: ResourcesReadOutcome = {
+				result: { uri: "device://status", mimeType: "application/json", content: {} },
+			};
 			mockClient.readResource.mockResolvedValue(rawResult);
 			mockClient.connect.mockResolvedValue(true);
 			mockClient.getTools.mockResolvedValue([]);
@@ -475,10 +493,37 @@ describe("ClientManager", () => {
 			const mgr = new ClientManager(config, () => mockClient as any);
 			await mgr.initialize();
 
-			const result = await mgr.readResource("myapp__device://status");
+			const { result } = await mgr.readResource("myapp__device://status");
 
-			expect(mockClient.readResource).toHaveBeenCalledWith("device://status");
+			expect(mockClient.readResource).toHaveBeenCalledWith("device://status", undefined);
 			expect(result.uri).toBe("myapp__device://status");
+
+			mgr.close();
+		});
+
+		it("should forward request _meta to the owning client and surface result _meta", async () => {
+			const meta = { progressToken: "p-9" };
+			const mockClient = createMockClient({ isConnected: true });
+			// `_meta` rides the envelope, as a sibling of `result`.
+			const rawResult: ResourcesReadOutcome = {
+				result: { uri: "device://status", mimeType: "application/json", content: {} },
+				_meta: { cachedAt: "2026-09-02" },
+			};
+			mockClient.readResource.mockResolvedValue(rawResult);
+			mockClient.connect.mockResolvedValue(true);
+			mockClient.getTools.mockResolvedValue([]);
+			mockClient.getResources.mockResolvedValue([createMockResource({ uri: "device://status", name: "status" })]);
+
+			const config: ClientManagerConfig = { apps: [{ name: "myapp", socketBaseName: "my" }] };
+			const mgr = new ClientManager(config, () => mockClient as any);
+			await mgr.initialize();
+
+			const outcome = await mgr.readResource("myapp__device://status", meta);
+
+			expect(mockClient.readResource).toHaveBeenCalledWith("device://status", meta);
+			// Re-prefixing the URI must not drop the app's response metadata.
+			expect(outcome._meta).toEqual({ cachedAt: "2026-09-02" });
+			expect(outcome.result.uri).toBe("myapp__device://status");
 
 			mgr.close();
 		});

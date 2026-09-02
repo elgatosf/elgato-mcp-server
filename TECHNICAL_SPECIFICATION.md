@@ -146,7 +146,10 @@ The system consists of four main source files:
 **Responsibilities:**
 
 - Provide logging utilities with consistent prefix
-- Common helper functions
+- Convert IPC wire-format tools/resources to MCP SDK format (`convertToMcpTools`, `convertToMcpResources`)
+- Prefix and unprefix app-scoped tool/resource names (`prefixName`, `unprefixName`)
+- Guard JSON object shapes for structured content and response metadata (`isPlainObject`)
+- Parse CLI arguments and print help
 
 #### 3.1.7 Type Definitions (`src/types.ts`)
 
@@ -224,7 +227,7 @@ Returns the built-in `bridge_status` tool followed by dynamically discovered too
 }
 ```
 
-`title`, `outputSchema`, and `_meta` are optional and forwarded when provided by the app; `inputSchema.type` and `outputSchema.type` default to `"object"` if omitted.
+`title`, `outputSchema`, and `_meta` are optional and forwarded when provided by the app; `inputSchema.type` and `outputSchema.type` default to `"object"` if omitted. This `_meta` describes the tool *definition*; request and result metadata are covered under `tools/call` below.
 
 #### tools/call
 
@@ -235,9 +238,15 @@ Forwards tool invocation to Stream Deck and returns the result.
 ```json
 {
     "name": "tool_name",
-    "arguments": { "param1": "value1" }
+    "arguments": { "param1": "value1" },
+    "_meta": { "progressToken": 1 }
 }
 ```
+
+`_meta` is optional. When the MCP client supplies it, the bridge forwards it verbatim to the
+owning app as a top-level `_meta` field on the `call_tool` IPC request (see Section 4.3). This
+includes `progressToken`, so an app can report progress by emitting a `notifications/progress`
+message, which the bridge relays to the client through its notification forwarding path.
 
 **Response (Success, tool without `outputSchema`):**
 
@@ -258,6 +267,27 @@ Per MCP spec (2025-06-18), tools that declare an `outputSchema` must return `str
 }
 ```
 
+**Response metadata:**
+
+The app returns `_meta` on the response *envelope*, as a sibling of `result` (Section 4.3), so the
+tool's payload is passed through untouched. The bridge surfaces that envelope metadata as
+top-level `_meta` on the MCP result:
+
+```json
+{
+    "content": [{ "type": "text", "text": "{ \"brightness\": 80 }" }],
+    "structuredContent": { "brightness": 80 },
+    "_meta": { "durationMs": 12 }
+}
+```
+
+Because the bridge never reaches into the payload, a tool whose `outputSchema` legitimately
+declares a `_meta` property keeps that key in `structuredContent` — the two are independent.
+
+`_meta` is forwarded only when the app sends a JSON **object**. The spec types `Result._meta` as
+an object and strict clients (e.g. the official TypeScript SDK) reject a result carrying anything
+else, so a non-object value is dropped and logged at debug level rather than passed on.
+
 **Response (Error):**
 
 ```json
@@ -266,6 +296,8 @@ Per MCP spec (2025-06-18), tools that declare an `outputSchema` must return `str
     "isError": true
 }
 ```
+
+A tool-level error result carries the same envelope `_meta` through when the app supplied one.
 
 #### resources/list
 
@@ -294,9 +326,12 @@ Reads a specific resource by URI from Stream Deck.
 
 ```json
 {
-    "uri": "streamdeck://resource/identifier"
+    "uri": "streamdeck://resource/identifier",
+    "_meta": { "progressToken": 1 }
 }
 ```
+
+`_meta` is optional and forwarded verbatim to the owning app on the `resources_read` IPC request.
 
 **Response (Success):**
 
@@ -308,9 +343,14 @@ Reads a specific resource by URI from Stream Deck.
             "mimeType": "application/json",
             "text": "{\"key\": \"value\"}"
         }
-    ]
+    ],
+    "_meta": { "cachedAt": "2026-09-02" }
 }
 ```
+
+`_meta` comes from the `resources_read` response envelope and is present only when the app sent
+one. It is attached to the result, never to the individual `contents` items, and is subject to the
+same object-only check as on `tools/call`.
 
 #### resources/subscribe
 
@@ -390,7 +430,8 @@ Stream Deck sends an elicitation request during tool execution:
             "properties": {
                 "fieldName": { "type": "string" }
             }
-        }
+        },
+        "_meta": { "progressToken": 1 }
     }
 }
 ```
@@ -402,6 +443,9 @@ Stream Deck sends an elicitation request during tool execution:
 - `params.message`: Prompt message to display to the user
 - `params.mode`: Currently only `"form"` is supported
 - `params.requestedSchema`: JSON Schema defining the expected user input
+- `params._meta`: Optional request metadata, forwarded verbatim to the MCP client on the
+  `elicitation/create` request. Per the MCP spec every request's `params` may carry `_meta`. The
+  key is omitted from the outgoing request when the app sends none.
 
 #### Elicitation Response Format
 
@@ -413,7 +457,8 @@ The bridge sends back the user's response:
     "method": "elicitation/response",
     "result": {
         "action": "accept",
-        "content": { "fieldName": "user value" }
+        "content": { "fieldName": "user value" },
+        "_meta": { "vendor/client": "claude" }
     }
 }
 ```
@@ -423,6 +468,12 @@ The bridge sends back the user's response:
 - `accept`: User provided input (includes `content` field)
 - `decline`: User declined to provide input
 - `cancel`: User cancelled the operation
+
+`result._meta` is the MCP client's own response metadata, per the spec's
+`ElicitResult extends Result`. The bridge maps it straight back into the IPC response result and
+omits the key when the client sent none. The two locally-generated `decline` responses (no active
+MCP server for the correlation ID, and a forwarding failure) carry no `_meta`, since no client
+result exists to take it from.
 
 #### Elicitation Timeout
 
@@ -463,9 +514,14 @@ Communication with Stream Deck uses JSON messages terminated by newline (`\n`).
     "id": "3",
     "method": "call_tool",
     "toolName": "button_press",
-    "arguments": { "button_id": 5 }
+    "arguments": { "button_id": 5 },
+    "_meta": { "progressToken": 1 }
 }
 ```
+
+`_meta` mirrors the MCP client's request metadata. The key is **omitted entirely** when the
+client sent none, so an app cannot distinguish "no metadata" from "older bridge" — the field is
+advisory and must not be used for version detection.
 
 **resources_list**
 
@@ -479,9 +535,12 @@ Communication with Stream Deck uses JSON messages terminated by newline (`\n`).
 {
     "id": "5",
     "method": "resources_read",
-    "uri": "streamdeck://resource/identifier"
+    "uri": "streamdeck://resource/identifier",
+    "_meta": { "progressToken": 1 }
 }
 ```
+
+As with `call_tool`, `_meta` is omitted when the MCP client sent none.
 
 #### Response Types
 
@@ -530,6 +589,22 @@ The `result` object itself is the tool's structured payload (there is no `data` 
 }
 ```
 
+Response metadata rides the envelope as a sibling of `result`, never inside it:
+
+```json
+{
+  "id": "3",
+  "result": { "layers": [...] },
+  "_meta": { "durationMs": 12 }
+}
+```
+
+This applies uniformly to every response type — `call_tool`, `resources_read`, `tools_list`,
+`resources_list` and `server_info` may all carry an envelope `_meta`. The bridge currently
+surfaces it for `call_tool` and `resources_read` only; on the list and info responses it is
+accepted and ignored, because those are aggregated across apps into a single cached MCP list
+and there is no defined merge policy for combining several apps' metadata.
+
 **ResourcesListResponse**
 
 ```json
@@ -560,9 +635,13 @@ The `result` object itself is the tool's structured payload (there is no `data` 
         "uri": "streamdeck://resource/identifier",
         "mimeType": "application/json",
         "content": { "key": "value" }
-    }
+    },
+    "_meta": { "cachedAt": "2026-09-02" }
 }
 ```
+
+`_meta` is optional and sits beside `result`; when present the bridge surfaces it on the MCP
+`resources/read` result.
 
 **ErrorResponse**
 
@@ -607,18 +686,23 @@ server.server.setRequestHandler(ListToolsRequestSchema, async () => {
 // a tool is surfaced as a tool error (isError) rather than a spec-violating success,
 // since structuredContent must be a JSON object.
 server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const result = await clientManager.callTool(request.params.name, request.params.arguments ?? {});
+    // Client request metadata (including progressToken) is forwarded to the app verbatim.
+    const response = await clientManager.callTool(request.params.name, request.params.arguments ?? {}, correlationId, request.params._meta);
+    // Response metadata rides the envelope beside `result`; object-only, per the spec.
+    const metaFields = isPlainObject(response._meta) ? { _meta: response._meta } : {};
+    const result = response.result;
     const tool = clientManager.getTools().find((t) => t.name === request.params.name);
     if (tool?.outputSchema !== undefined) {
-        if (result === null || typeof result !== "object" || Array.isArray(result)) {
+        if (!isPlainObject(result)) {
             return {
                 content: [{ type: "text", text: `Tool "${request.params.name}" declares an outputSchema but returned a non-object result` }],
                 isError: true,
             };
         }
-        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result };
+        // The payload is passed through untouched — the bridge never rewrites it.
+        return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result, ...metaFields };
     }
-    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    return { content: [{ type: "text", text: JSON.stringify(result ?? null, null, 2) }], ...metaFields };
 });
 ```
 
@@ -1188,6 +1272,8 @@ interface ResponseBase {
     id: string;
     result?: unknown;
     error?: McpError;
+    // Response metadata, a sibling of `result` on the wire (never inside it)
+    _meta?: Record<string, unknown>;
 }
 
 // Server info response
@@ -1239,12 +1325,20 @@ interface ResourcesListResponse extends ResponseBase {
 interface ResourcesReadRequest extends RequestBase {
     method: "resources_read";
     uri: string;
+    _meta?: Record<string, unknown>;
 }
 
 interface ResourcesReadResult {
     uri: string;
     mimeType: string;
     content: unknown;
+}
+
+// What IpcClient/ClientManager return: the result plus the envelope's `_meta`,
+// so re-shaping the result (e.g. re-prefixing the URI) cannot drop the metadata.
+interface ResourcesReadOutcome {
+    result: ResourcesReadResult;
+    _meta?: Record<string, unknown>;
 }
 
 interface ResourcesReadResponse extends ResponseBase {

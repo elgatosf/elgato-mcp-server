@@ -9,7 +9,7 @@ import type {
 	ElicitationCallback,
 	IpcClientConfig,
 	NotificationCallback,
-	ResourcesReadResult,
+	ResourcesReadOutcome,
 	ServerInfo,
 } from "./types.js";
 import { convertToMcpResources, convertToMcpTools, log, prefixName, unprefixName } from "./utils.js";
@@ -81,9 +81,15 @@ export class ClientManager {
 	 * @param name - Prefixed tool name.
 	 * @param args - Arguments to pass to the tool.
 	 * @param requestId - Optional correlation request ID.
+	 * @param meta - Optional MCP request metadata to forward to the owning app.
 	 * @returns The tool call response.
 	 */
-	public async callTool(name: string, args: Record<string, unknown>, requestId?: string): Promise<CallToolResponse> {
+	public async callTool(
+		name: string,
+		args: Record<string, unknown>,
+		requestId?: string,
+		meta?: Record<string, unknown>,
+	): Promise<CallToolResponse> {
 		const appName = this.toolOwnership.get(name);
 		if (!appName) {
 			throw new Error(`Unknown tool: ${name}`);
@@ -96,7 +102,7 @@ export class ClientManager {
 
 		const unprefixed = unprefixName(name);
 		const bareName = unprefixed?.itemName ?? name;
-		return client.callTool(bareName, args, requestId);
+		return client.callTool(bareName, args, requestId, meta);
 	}
 
 	/**
@@ -205,9 +211,10 @@ export class ClientManager {
 	/**
 	 * Reads a resource by prefixed URI from the owning app client.
 	 * @param uri - Prefixed resource URI (e.g. `streamdeck__device://status`).
-	 * @returns The resource read result.
+	 * @param meta - Optional MCP request metadata to forward to the owning app.
+	 * @returns The resource read result plus the response envelope's `_meta`.
 	 */
-	public async readResource(uri: string): Promise<ResourcesReadResult> {
+	public async readResource(uri: string, meta?: Record<string, unknown>): Promise<ResourcesReadOutcome> {
 		const appName = this.resourceOwnership.get(uri);
 		if (!appName) {
 			throw new Error(`Unknown resource: ${uri}`);
@@ -220,10 +227,11 @@ export class ClientManager {
 
 		const unprefixed = unprefixName(uri);
 		const bareUri = unprefixed?.itemName ?? uri;
-		const result = await client.readResource(bareUri);
+		const { result, _meta } = await client.readResource(bareUri, meta);
 
-		// Re-prefix the returned URI so MCP clients see consistent prefixed URIs
-		return { ...result, uri: prefixName(appName, result.uri) };
+		// Re-prefix the returned URI so MCP clients see consistent prefixed URIs.
+		// `_meta` sits outside `result`, so this reshaping cannot drop it.
+		return { result: { ...result, uri: prefixName(appName, result.uri) }, _meta };
 	}
 
 	/**

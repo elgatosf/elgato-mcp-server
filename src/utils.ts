@@ -77,6 +77,15 @@ export function convertToMcpResources(resources: McpResource[]): Resource[] {
 }
 
 /**
+ * Type guard for a plain JSON object — non-null and not an array.
+ * @param value - The value to test.
+ * @returns Whether the value is a plain object.
+ */
+export function isPlainObject(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
  * Structured logger with severity levels.
  * - `error` and `warn` always output to stderr regardless of verbose mode.
  * - `info` and `debug` only output when verbose mode is enabled via --verbose/-v flag.
