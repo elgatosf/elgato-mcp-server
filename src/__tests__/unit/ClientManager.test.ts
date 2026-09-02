@@ -2,9 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ClientManager } from "../../ClientManager.js";
 import type { IpcClientFactory } from "../../ClientManager.js";
-import { SDK_NOTIFICATIONS } from "../../constants.js";
-import type { CallToolResponse, ClientManagerConfig, IpcClientConfig, ResourcesReadOutcome } from "../../types.js";
-import { createMockClient, createMockResource, createMockServerInfo, createMockTool } from "../helpers/testUtils.js";
+import { DEFAULT_SERVER_INFO, SDK_NOTIFICATIONS } from "../../constants.js";
+import type {
+	CallToolResponse,
+	ClientManagerConfig,
+	IpcClientConfig,
+	ResourcesReadOutcome,
+	ServerInfo,
+} from "../../types.js";
+import { createMockClient, createMockResource, createMockServerInfo, createMockTool, wait } from "../helpers/testUtils.js";
 
 /**
  * Creates a ClientManager wired to two deterministic mock clients for testing.
@@ -359,12 +365,133 @@ describe("ClientManager", () => {
 	// -------------------------------------------------------------------------
 
 	describe("getServerInfo", () => {
-		it("should return the static Elgato MCP Server info", () => {
+		/**
+		 * Wires a manager whose connected clients return the given server infos, then initializes it.
+		 * @param infos - Server info (or thrown error) per app slot; `null` means the app returns none.
+		 * @returns The initialized manager.
+		 */
+		const managerWithServerInfo = async (infos: {
+			app1?: ServerInfo | Error | null;
+			app2?: ServerInfo | Error | null;
+		}): Promise<ClientManager> => {
+			const { manager: m, mockClient1, mockClient2 } = createTestManager({
+				app1Connected: infos.app1 !== undefined,
+				app2Connected: infos.app2 !== undefined,
+			});
+			for (const [client, info] of [
+				[mockClient1, infos.app1],
+				[mockClient2, infos.app2],
+			] as const) {
+				client.connect.mockResolvedValue(info !== undefined);
+				client.getTools.mockResolvedValue([]);
+				client.getResources.mockResolvedValue([]);
+				if (info instanceof Error) {
+					client.getServerInfo.mockRejectedValue(info);
+				} else {
+					client.getServerInfo.mockResolvedValue(info ?? null);
+				}
+			}
+			await m.initialize();
+			return m;
+		};
+
+		it("should return the default Elgato MCP Server info before initialize", () => {
 			const { manager: m } = createTestManager();
 			manager = m;
 			const info = manager.getServerInfo();
 			expect(info.name).toBe("Elgato MCP Server");
 			expect(info.version).toBeTruthy();
+		});
+
+		it("should keep the default info when no app is connected", async () => {
+			manager = await managerWithServerInfo({});
+			expect(manager.getServerInfo().name).toBe("Elgato MCP Server");
+			expect(manager.getServerInfo().instructions).toBeUndefined();
+		});
+
+		it("should surface a connected app's name, version and instructions", async () => {
+			manager = await managerWithServerInfo({
+				app1: createMockServerInfo({
+					name: "Stream Deck MCP Server",
+					version: "7.3.0",
+					instructions: "Controls the Elgato Stream Deck desktop application.",
+				}),
+			});
+
+			const info = manager.getServerInfo();
+			expect(info.name).toBe("Stream Deck MCP Server");
+			expect(info.version).toBe("7.3.0");
+			// A single app's text is used exactly as written, with no added heading.
+			expect(info.instructions).toBe("Controls the Elgato Stream Deck desktop application.");
+		});
+
+		it("should fall back per-field to the default title and icons", async () => {
+			manager = await managerWithServerInfo({
+				// The app supplies neither title nor icons; the bridge's own branding must survive.
+				app1: createMockServerInfo({ name: "Stream Deck MCP Server", version: "7.3.0" }),
+			});
+
+			const info = manager.getServerInfo();
+			expect(info.icons).toEqual(DEFAULT_SERVER_INFO.icons);
+			expect(info.title).toBe(DEFAULT_SERVER_INFO.title);
+		});
+
+		it("should label and concatenate instructions from several connected apps", async () => {
+			manager = await managerWithServerInfo({
+				app1: createMockServerInfo({ name: "First", version: "1.0.0", instructions: "Drives app1." }),
+				app2: createMockServerInfo({ name: "Second", version: "2.0.0", instructions: "Drives app2." }),
+			});
+
+			const info = manager.getServerInfo();
+			// Scalars come from the first app in registry order...
+			expect(info.name).toBe("First");
+			expect(info.version).toBe("1.0.0");
+			// ...but no app's guidance is discarded.
+			expect(info.instructions).toContain("## app1");
+			expect(info.instructions).toContain("Drives app1.");
+			expect(info.instructions).toContain("## app2");
+			expect(info.instructions).toContain("Drives app2.");
+		});
+
+		it("should omit instructions when connected apps supply none", async () => {
+			manager = await managerWithServerInfo({
+				app1: createMockServerInfo({ name: "First", version: "1.0.0" }),
+			});
+			expect(manager.getServerInfo().instructions).toBeUndefined();
+		});
+
+		it("should skip an app whose server_info fails without losing the other app's info", async () => {
+			manager = await managerWithServerInfo({
+				app1: new Error("socket closed"),
+				app2: createMockServerInfo({ name: "Second", version: "2.0.0", instructions: "Drives app2." }),
+			});
+
+			const info = manager.getServerInfo();
+			expect(info.name).toBe("Second");
+			// Only one app contributed, so its text stays verbatim rather than being labelled.
+			expect(info.instructions).toBe("Drives app2.");
+		});
+
+		it("should refresh the cached info when a client reconnects", async () => {
+			const { manager: m, mockClient1 } = createTestManager({ app1Connected: true });
+			manager = m;
+			mockClient1.connect.mockResolvedValue(true);
+			mockClient1.getTools.mockResolvedValue([]);
+			mockClient1.getResources.mockResolvedValue([]);
+			mockClient1.getServerInfo.mockResolvedValue(createMockServerInfo({ name: "Before", version: "1.0.0" }));
+			await manager.initialize();
+			expect(manager.getServerInfo().name).toBe("Before");
+
+			// The app restarts and now reports different info.
+			mockClient1.getServerInfo.mockResolvedValue(
+				createMockServerInfo({ name: "After", version: "2.0.0", instructions: "Now with guidance." }),
+			);
+			const onConnected = mockClient1.onConnected.mock.calls[0]?.[0] as () => void;
+			onConnected();
+			await wait(10);
+
+			expect(manager.getServerInfo().name).toBe("After");
+			expect(manager.getServerInfo().instructions).toBe("Now with guidance.");
 		});
 	});
 

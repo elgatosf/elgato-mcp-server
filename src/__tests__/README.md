@@ -8,17 +8,17 @@ This directory contains comprehensive test coverage for the Elgato MCP Server pr
 | ----------- | ------------------------- |
 | Build       | ✅ Passing                |
 | Test Suites | 12 of 12 passing (100%)   |
-| Tests       | 346 of 346 passing (100%) |
+| Tests       | 355 of 355 passing (100%) |
 | Skipped     | 0 tests                   |
 
 ### Coverage Metrics
 
 | Metric     | Coverage | Threshold |
 | ---------- | -------- | --------- |
-| Statements | 89.03%   | 80% ✅    |
-| Branches   | 83.97%   | 80% ✅    |
-| Functions  | 90.00%   | 80% ✅    |
-| Lines      | 89.34%   | 80% ✅    |
+| Statements | 89.33%   | 80% ✅    |
+| Branches   | 84.81%   | 80% ✅    |
+| Functions  | 90.28%   | 80% ✅    |
+| Lines      | 89.62%   | 80% ✅    |
 
 ## Test Structure
 
@@ -34,8 +34,8 @@ src/__tests__/
 │   ├── constants.test.ts                 # Socket path generation tests (6 tests)
 │   ├── utils.test.ts                     # Utility functions tests (45 tests)
 │   ├── IpcClient.test.ts                 # IPC client tests (74 tests, includes elicitation)
-│   ├── ClientManager.test.ts             # Client manager aggregation tests (45 tests)
-│   ├── McpBridge.test.ts                 # MCP bridge logic tests (72 tests, includes elicitation)
+│   ├── ClientManager.test.ts             # Client manager aggregation tests (52 tests)
+│   ├── McpBridge.test.ts                 # MCP bridge logic tests (74 tests, includes elicitation)
 │   ├── stdio.test.ts                     # stdio transport lifecycle tests (10 tests)
 │   ├── http-server-startup.test.ts       # HTTP server initialization tests (5 tests)
 │   └── http-session-timeout.test.ts      # HTTP session timeout tests (21 tests)
@@ -100,7 +100,7 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Envelope `_meta` (sibling of `result`) surfacing on the `resources_read` outcome
 - Elicitation handling (type guard, callback registration, response handling, timeout, error handling)
 
-#### ClientManager.test.ts (45 tests)
+#### ClientManager.test.ts (52 tests)
 
 - Multi-client aggregation of tools and resources
 - `appname__` prefix application and stripping
@@ -109,8 +109,10 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Handling connected/disconnected client states
 - URI prefixing in RESOURCES_UPDATED notifications for subscription matching
 - Pass-through of request `_meta` to the owning client, and of envelope `_meta` back to the caller across URI re-prefixing
+- `server_info` merging: per-field fallback to the defaults, single-app instructions verbatim vs
+  multi-app labelled sections, isolation when one app's fetch fails, and refresh on reconnect
 
-#### McpBridge.test.ts (72 tests)
+#### McpBridge.test.ts (74 tests)
 
 - Initialization (connected and disconnected modes)
 - Server creation with custom info
@@ -130,6 +132,8 @@ pnpm test:ci           # Run tests in CI/CD mode
   errors, with the object-only guard still applied
 - Elicitation `_meta` round-trip: `params._meta` reaching `elicitInput`, `ElicitResult._meta`
   returning on the IPC response, and neither key appearing when absent
+- `InitializeResult.instructions` driven through a real `initialize` request, present when the
+  app supplies instructions and absent when it does not
 
 #### http-server-startup.test.ts (5 tests)
 

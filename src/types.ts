@@ -147,6 +147,8 @@ export interface ServerInfo {
 	version: string;
 	title?: string;
 	icons?: McpIcon[];
+	/** LLM-facing usage instructions from the app, surfaced as `InitializeResult.instructions`. */
+	instructions?: string;
 }
 
 /**

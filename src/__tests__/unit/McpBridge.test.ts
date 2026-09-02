@@ -52,6 +52,58 @@ describe("McpBridge", () => {
 			expect(mockClientManager.getServerInfo).toHaveBeenCalled();
 		});
 
+		it("should surface the app's instructions in the initialize result", async () => {
+			mockClientManager.getServerInfo.mockReturnValue({
+				name: "Stream Deck MCP Server",
+				version: "7.3.0",
+				instructions: "Controls the Elgato Stream Deck desktop application.",
+			});
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "initialize",
+				params: {
+					protocolVersion: "2025-06-18",
+					capabilities: {},
+					clientInfo: { name: "test-client", version: "1.0.0" },
+				},
+			});
+
+			const response = await transport.waitForOutgoingMessage();
+			// Instructions belong in ServerOptions, and the SDK emits them on InitializeResult.
+			expect((response as any).result.instructions).toBe(
+				"Controls the Elgato Stream Deck desktop application.",
+			);
+			expect((response as any).result.serverInfo.name).toBe("Stream Deck MCP Server");
+		});
+
+		it("should omit instructions from the initialize result when the app supplies none", async () => {
+			mockClientManager.getServerInfo.mockReturnValue({ name: "Elgato MCP Server", version: "1.0.0" });
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "initialize",
+				params: {
+					protocolVersion: "2025-06-18",
+					capabilities: {},
+					clientInfo: { name: "test-client", version: "1.0.0" },
+				},
+			});
+
+			const response = await transport.waitForOutgoingMessage();
+			expect("instructions" in (response as any).result).toBe(false);
+		});
+
 		it("should create independent server instances each time", () => {
 			const server1 = bridge.createServer();
 			const server2 = bridge.createServer();

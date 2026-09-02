@@ -75,6 +75,10 @@ export class McpBridge {
 				icons: serverInfo.icons,
 			},
 			{
+				// The app's LLM-facing usage guidance; the SDK emits this as
+				// `InitializeResult.instructions`, which lives in ServerOptions rather than
+				// in the server-info object above.
+				...(serverInfo.instructions !== undefined && { instructions: serverInfo.instructions }),
 				capabilities: {
 					tools: { listChanged: true },
 					resources: { subscribe: true, listChanged: true },

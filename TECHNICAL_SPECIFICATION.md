@@ -100,6 +100,8 @@ The system consists of four main source files:
 
 - Manage one `IpcClient` instance per known app
 - Aggregate tools and resources across all connected clients using `appname__` prefixes
+- Merge the connected apps' `server_info` into the identity the bridge advertises, including
+  `instructions` (see §4.3)
 - Route `tools/call` and `resources/read` requests to the correct client by stripping the prefix
 - Forward `onToolsChanged`, `onResourcesChanged`, `onNotification`, and `onElicitation` events from any client to registered callbacks
 
@@ -559,13 +561,48 @@ As with `call_tool`, `_meta` is omitted when the MCP client sent none.
 {
   "id": "1",
   "result": {
-    "name": "Elgato MCP Server",
-    "version": "1.0.0",
-    "title": "Elgato MCP Server",
-    "icons": [...]
+    "name": "Stream Deck MCP Server",
+    "version": "7.3.0",
+    "title": "Stream Deck MCP Server",
+    "icons": [...],
+    "instructions": "Controls the Elgato Stream Deck desktop application: ..."
   }
 }
 ```
+
+`instructions` is optional LLM-facing guidance. The bridge surfaces it as
+`InitializeResult.instructions` on the MCP side — in the TypeScript SDK that value is passed via
+`ServerOptions` (the second `McpServer` constructor argument), not in the server-info object.
+
+**How the bridge merges this across apps.** `ClientManager.refreshAll()` fetches `server_info`
+from every connected app, in app-registry order, and merges the responses into the single
+identity the bridge advertises:
+
+| Field | Rule |
+|---|---|
+| `name`, `version` | From the first responding app. |
+| `title`, `icons` | From the first app that defines them, else the `DEFAULT_SERVER_INFO` value — a per-field fallback, so an app that omits `icons` does not strip the bridge's branding. |
+| `instructions` | One app with instructions: used **verbatim**, with no added heading. Two or more: joined as `## <appName>` sections, so no app's guidance is discarded. |
+
+If no app has responded — nothing connected, or every fetch failed — `DEFAULT_SERVER_INFO` is
+used unchanged, and it deliberately carries no `instructions`: with no app there is nothing
+meaningful to say, and the `bridge_status` tool description already covers that state. A
+`server_info` failure for one app is isolated and costs neither that app's tools/resources nor
+the other apps' info.
+
+Note this means the advertised server name and version come from the connected app once one is
+available, rather than from the bridge's own package.
+
+**Session-timing caveat.** `createServer()` reads this cache at call time, and an
+`InitializeResult` is sent once per session with no MCP channel for amending it afterwards:
+
+- **HTTP** — a server is created per session on each initialize, so every new session picks up
+  the current cache. Already-initialized sessions keep the result they were given.
+- **stdio** — the server is created exactly once at startup, and startup deliberately does not
+  wait for an app (see §5.2.1 Resilient Startup). If no app is running at that moment, that
+  session advertises `DEFAULT_SERVER_INFO` for its whole lifetime; a later reconnect refreshes
+  the cache for future sessions but cannot change the one already negotiated. Recovering
+  requires the MCP client to reconnect.
 
 **ToolsListResponse**
 
@@ -1291,6 +1328,8 @@ interface ServerInfoResponse extends ResponseBase {
     version: string;
     title?: string;
     icons?: McpIcon[];
+    // LLM-facing usage instructions, surfaced as InitializeResult.instructions
+    instructions?: string;
 }
 
 // Tools list response
