@@ -1092,6 +1092,91 @@ describe("McpBridge", () => {
 			expect((response as any).result.content[0].text).toBe(JSON.stringify({ status: "ok" }, null, 2));
 		});
 
+		it("should surface envelope _meta alongside a top-level response error", async () => {
+			(mockClientManager as any).isConnected = true;
+			// A transport/app-level failure: `error` is set on the envelope instead of `result`.
+			// `_meta` is a property of the response, so it applies here too.
+			mockClientManager.callTool.mockResolvedValue({
+				id: "1",
+				error: { message: "device unreachable" },
+				_meta: { retryAfterMs: 250 },
+			} as any);
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: { name: "streamdeck__test_tool", arguments: {} },
+			});
+
+			const response = await transport.waitForOutgoingMessage();
+			expect((response as any).result.isError).toBe(true);
+			expect((response as any).result.content[0].text).toBe("device unreachable");
+			expect((response as any).result._meta).toEqual({ retryAfterMs: 250 });
+		});
+
+		it("should not forward a non-object envelope _meta on a top-level response error", async () => {
+			(mockClientManager as any).isConnected = true;
+			mockClientManager.callTool.mockResolvedValue({
+				id: "1",
+				error: { message: "device unreachable" },
+				_meta: "nope",
+			} as any);
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: { name: "streamdeck__test_tool", arguments: {} },
+			});
+
+			const response = await transport.waitForOutgoingMessage();
+			// The object-only guard applies on the error path exactly as on the success paths.
+			expect((response as any).result.isError).toBe(true);
+			expect("_meta" in (response as any).result).toBe(false);
+		});
+
+		it("should surface envelope _meta on an outputSchema-violation error", async () => {
+			(mockClientManager as any).isConnected = true;
+			mockClientManager.getTools.mockReturnValue([
+				createMockTool({
+					name: "streamdeck__structured_tool",
+					outputSchema: { type: "object", properties: {} },
+				}),
+			] as any);
+			// The app responded successfully; the bridge is the one turning a non-object payload
+			// into a tool error, so the app's metadata must not be discarded along the way.
+			mockClientManager.callTool.mockResolvedValue({
+				id: "1",
+				result: "just a string",
+				_meta: { durationMs: 4 },
+			} as any);
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: { name: "streamdeck__structured_tool", arguments: {} },
+			});
+
+			const response = await transport.waitForOutgoingMessage();
+			expect((response as any).result.isError).toBe(true);
+			expect((response as any).result.content[0].text).toContain("outputSchema");
+			expect((response as any).result._meta).toEqual({ durationMs: 4 });
+		});
+
 		it("should pass a tool payload's own _meta key through into structuredContent", async () => {
 			(mockClientManager as any).isConnected = true;
 			mockClientManager.getTools.mockReturnValue([

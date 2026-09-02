@@ -8,17 +8,17 @@ This directory contains comprehensive test coverage for the Elgato MCP Server pr
 | ----------- | ------------------------- |
 | Build       | ✅ Passing                |
 | Test Suites | 12 of 12 passing (100%)   |
-| Tests       | 343 of 343 passing (100%) |
+| Tests       | 346 of 346 passing (100%) |
 | Skipped     | 0 tests                   |
 
 ### Coverage Metrics
 
 | Metric     | Coverage | Threshold |
 | ---------- | -------- | --------- |
-| Statements | 89.00%   | 80% ✅    |
-| Branches   | 84.08%   | 80% ✅    |
-| Functions  | 89.94%   | 80% ✅    |
-| Lines      | 89.32%   | 80% ✅    |
+| Statements | 89.03%   | 80% ✅    |
+| Branches   | 83.97%   | 80% ✅    |
+| Functions  | 90.00%   | 80% ✅    |
+| Lines      | 89.34%   | 80% ✅    |
 
 ## Test Structure
 
@@ -35,7 +35,7 @@ src/__tests__/
 │   ├── utils.test.ts                     # Utility functions tests (45 tests)
 │   ├── IpcClient.test.ts                 # IPC client tests (74 tests, includes elicitation)
 │   ├── ClientManager.test.ts             # Client manager aggregation tests (45 tests)
-│   ├── McpBridge.test.ts                 # MCP bridge logic tests (69 tests, includes elicitation)
+│   ├── McpBridge.test.ts                 # MCP bridge logic tests (72 tests, includes elicitation)
 │   ├── stdio.test.ts                     # stdio transport lifecycle tests (10 tests)
 │   ├── http-server-startup.test.ts       # HTTP server initialization tests (5 tests)
 │   └── http-session-timeout.test.ts      # HTTP session timeout tests (21 tests)
@@ -110,7 +110,7 @@ pnpm test:ci           # Run tests in CI/CD mode
 - URI prefixing in RESOURCES_UPDATED notifications for subscription matching
 - Pass-through of request `_meta` to the owning client, and of envelope `_meta` back to the caller across URI re-prefixing
 
-#### McpBridge.test.ts (69 tests)
+#### McpBridge.test.ts (72 tests)
 
 - Initialization (connected and disconnected modes)
 - Server creation with custom info
@@ -126,6 +126,8 @@ pnpm test:ci           # Run tests in CI/CD mode
   as top-level `_meta` on the MCP result across the `outputSchema`, legacy and tool-error paths —
   including that a non-object envelope `_meta` is dropped, and that a tool payload's own `_meta`
   key survives into `structuredContent` untouched
+- Envelope `_meta` on error results: app-level (`response.error`) and outputSchema-violation
+  errors, with the object-only guard still applied
 - Elicitation `_meta` round-trip: `params._meta` reaching `elicitInput`, `ElicitResult._meta`
   returning on the IPC response, and neither key appearing when absent
 

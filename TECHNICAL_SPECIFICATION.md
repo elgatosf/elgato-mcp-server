@@ -297,7 +297,16 @@ else, so a non-object value is dropped and logged at debug level rather than pas
 }
 ```
 
-A tool-level error result carries the same envelope `_meta` through when the app supplied one.
+Envelope `_meta` is surfaced on **error** results too, since it is a property of the response
+rather than of the payload. That covers a tool-level error (`result.error`), an app-level error
+(`error` on the envelope), and the bridge's own outputSchema-violation error — in the last case
+the app responded successfully, so its metadata still applies. Errors the bridge raises without
+an app response (no apps connected, request timeout, transport failure) carry no `_meta`, as
+there is none to forward.
+
+Note this applies only to `tools/call`, which has an in-result error channel (`isError`). A
+failed `resources/read` becomes a JSON-RPC error response, and the JSON-RPC error object has no
+`_meta` field to carry it.
 
 #### resources/list
 

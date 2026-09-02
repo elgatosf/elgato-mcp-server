@@ -265,24 +265,18 @@ export class McpBridge {
 			try {
 				const response = await this.clientManager.callTool(name, args, correlationId, requestMeta);
 
+				// `_meta` rides the response envelope as a sibling of `result`, never inside it, so
+				// the tool's payload is passed through untouched. Read it before branching: it is a
+				// property of the response, so it applies to error results just as much as to
+				// successful ones.
+				const metaFields = this.toResultMeta(response._meta, name);
+
 				if (response.error) {
 					return {
 						content: [{ type: "text", text: response.error.message }],
 						isError: true,
+						...metaFields,
 					};
-				}
-
-				// `_meta` rides the response envelope as a sibling of `result`, never inside it,
-				// so the tool's payload is passed through untouched. The spec types `Result._meta`
-				// as an object and strict clients reject the whole result otherwise, so a
-				// non-object from the wire is dropped rather than forwarded.
-				let metaFields: { _meta?: Record<string, unknown> } = {};
-				if (response._meta !== undefined) {
-					if (isPlainObject(response._meta)) {
-						metaFields = { _meta: response._meta };
-					} else {
-						log.debug(`Dropping non-object _meta from "${name}" response`);
-					}
 				}
 
 				const result = response.result;
@@ -316,6 +310,7 @@ export class McpBridge {
 								},
 							],
 							isError: true,
+							...metaFields,
 						};
 					}
 					return {
@@ -373,8 +368,7 @@ export class McpBridge {
 					},
 				];
 				// Envelope `_meta` belongs on the result, never inside the `contents` items.
-				// Non-object values are dropped for the same reason as on the tool-call path.
-				return { contents, ...(isPlainObject(_meta) && { _meta }) };
+				return { contents, ...this.toResultMeta(_meta, uri) };
 			} catch (error) {
 				const message = error instanceof Error ? error.message : "Unknown error";
 				throw new Error(message);
@@ -477,6 +471,25 @@ export class McpBridge {
 				return { action: "decline" };
 			}
 		});
+	}
+
+	/**
+	 * Converts an IPC response's envelope `_meta` into spreadable MCP result fields.
+	 * The spec types `Result._meta` as an object and strict clients reject a result carrying
+	 * anything else, so a non-object value from the wire is dropped rather than forwarded.
+	 * @param meta - The `_meta` value from the response envelope.
+	 * @param context - Tool name or resource URI, used in the diagnostic when a value is dropped.
+	 * @returns `{ _meta }` when the value is forwardable, otherwise an empty object.
+	 */
+	private toResultMeta(meta: unknown, context: string): { _meta?: Record<string, unknown> } {
+		if (meta === undefined) {
+			return {};
+		}
+		if (isPlainObject(meta)) {
+			return { _meta: meta };
+		}
+		log.debug(`Dropping non-object _meta from "${context}" response`);
+		return {};
 	}
 }
 
