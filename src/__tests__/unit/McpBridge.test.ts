@@ -1462,6 +1462,57 @@ describe("McpBridge", () => {
 			expect((response as any).result.content[0].text).toBe("Tool execution failed");
 		});
 
+		it("should append envelope error data to the error text", async () => {
+			(mockClientManager as any).isConnected = true;
+			const message = "error: missing_session_id\nCall session_create(...) first, then retry.";
+			mockClientManager.callTool.mockResolvedValue({
+				id: "1",
+				error: { message, data: { code: "missing_session_id" } },
+			});
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: { name: "streamdeck__test_tool", arguments: {} },
+			});
+
+			const response = await transport.waitForOutgoingMessage();
+			expect((response as any).result.isError).toBe(true);
+			expect((response as any).result.content).toEqual([
+				{ type: "text", text: `${message}\n{"code":"missing_session_id"}` },
+			]);
+		});
+
+		it("should append string error data verbatim and keep envelope _meta", async () => {
+			(mockClientManager as any).isConnected = true;
+			mockClientManager.callTool.mockResolvedValue({
+				id: "1",
+				error: { message: "Tool failed", data: "see app log" },
+				_meta: { retryAfterMs: 250 },
+			} as any);
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: { name: "streamdeck__test_tool", arguments: {} },
+			});
+
+			const response = await transport.waitForOutgoingMessage();
+			expect((response as any).result.isError).toBe(true);
+			expect((response as any).result.content[0].text).toBe("Tool failed\nsee app log");
+			expect((response as any).result._meta).toEqual({ retryAfterMs: 250 });
+		});
+
 		it("should return error response when callTool result has error property", async () => {
 			(mockClientManager as any).isConnected = true;
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
