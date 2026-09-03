@@ -24,9 +24,9 @@ import type {
 	PendingRequest,
 	ResourcesListRequest,
 	ResourcesListResponse,
+	ResourcesReadOutcome,
 	ResourcesReadRequest,
 	ResourcesReadResponse,
-	ResourcesReadResult,
 	ServerInfo,
 	ServerInfoRequest,
 	ServerInfoResponse,
@@ -91,17 +91,20 @@ export class IpcClient {
 	 * @param toolName - Name of the tool to invoke.
 	 * @param args - Arguments to pass to the tool.
 	 * @param requestId - Optional request ID to use for correlation. If provided, must be unique.
+	 * @param meta - Optional MCP request metadata to forward to the app. Omitted from the wire request when absent.
 	 * @returns The tool call response.
 	 */
 	public async callTool(
 		toolName: string,
 		args: Record<string, unknown>,
 		requestId?: string,
+		meta?: Record<string, unknown>,
 	): Promise<CallToolResponse> {
 		const request: Omit<CallToolRequest, "id"> = {
 			method: "call_tool",
 			toolName,
 			arguments: args,
+			...(meta !== undefined && { _meta: meta }),
 		};
 
 		return this.sendRequest<CallToolResponse>(request, requestId);
@@ -233,10 +236,15 @@ export class IpcClient {
 	/**
 	 * Reads a resource by URI from the connected app.
 	 * @param uri - The resource URI to read.
-	 * @returns The resource read result containing contents.
+	 * @param meta - Optional MCP request metadata to forward to the app. Omitted from the wire request when absent.
+	 * @returns The resource read result plus the response envelope's `_meta`.
 	 */
-	public async readResource(uri: string): Promise<ResourcesReadResult> {
-		const request: Omit<ResourcesReadRequest, "id"> = { method: "resources_read", uri };
+	public async readResource(uri: string, meta?: Record<string, unknown>): Promise<ResourcesReadOutcome> {
+		const request: Omit<ResourcesReadRequest, "id"> = {
+			method: "resources_read",
+			uri,
+			...(meta !== undefined && { _meta: meta }),
+		};
 		const response = await this.sendRequest<ResourcesReadResponse>(request);
 
 		if (response.error) {
@@ -247,7 +255,7 @@ export class IpcClient {
 			throw new Error(`No result returned from ${this.config.name}`);
 		}
 
-		return response.result;
+		return { result: response.result, _meta: response._meta };
 	}
 
 	/**

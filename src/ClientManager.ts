@@ -9,7 +9,7 @@ import type {
 	ElicitationCallback,
 	IpcClientConfig,
 	NotificationCallback,
-	ResourcesReadResult,
+	ResourcesReadOutcome,
 	ServerInfo,
 } from "./types.js";
 import { convertToMcpResources, convertToMcpTools, log, prefixName, unprefixName } from "./utils.js";
@@ -31,6 +31,7 @@ export type IpcClientFactory = (config: IpcClientConfig) => IpcClient;
 export class ClientManager {
 	private readonly apps: AppDefinition[];
 	private cachedResources: Resource[] = [];
+	private cachedServerInfo: ServerInfo = DEFAULT_SERVER_INFO;
 	private cachedTools: Tool[] = [];
 	private readonly clientFactory: IpcClientFactory;
 	private readonly clients: Map<string, IpcClient> = new Map();
@@ -81,9 +82,15 @@ export class ClientManager {
 	 * @param name - Prefixed tool name.
 	 * @param args - Arguments to pass to the tool.
 	 * @param requestId - Optional correlation request ID.
+	 * @param meta - Optional MCP request metadata to forward to the owning app.
 	 * @returns The tool call response.
 	 */
-	public async callTool(name: string, args: Record<string, unknown>, requestId?: string): Promise<CallToolResponse> {
+	public async callTool(
+		name: string,
+		args: Record<string, unknown>,
+		requestId?: string,
+		meta?: Record<string, unknown>,
+	): Promise<CallToolResponse> {
 		const appName = this.toolOwnership.get(name);
 		if (!appName) {
 			throw new Error(`Unknown tool: ${name}`);
@@ -96,7 +103,7 @@ export class ClientManager {
 
 		const unprefixed = unprefixName(name);
 		const bareName = unprefixed?.itemName ?? name;
-		return client.callTool(bareName, args, requestId);
+		return client.callTool(bareName, args, requestId, meta);
 	}
 
 	/**
@@ -117,11 +124,12 @@ export class ClientManager {
 	}
 
 	/**
-	 * Returns the static server info for the MCP bridge.
-	 * @returns The default server info.
+	 * Returns the server info advertised by the bridge, merged from the connected apps.
+	 * Falls back to {@link DEFAULT_SERVER_INFO} until an app has responded to `server_info`.
+	 * @returns The cached server info.
 	 */
 	public getServerInfo(): ServerInfo {
-		return DEFAULT_SERVER_INFO;
+		return this.cachedServerInfo;
 	}
 
 	/**
@@ -205,9 +213,10 @@ export class ClientManager {
 	/**
 	 * Reads a resource by prefixed URI from the owning app client.
 	 * @param uri - Prefixed resource URI (e.g. `streamdeck__device://status`).
-	 * @returns The resource read result.
+	 * @param meta - Optional MCP request metadata to forward to the owning app.
+	 * @returns The resource read result plus the response envelope's `_meta`.
 	 */
-	public async readResource(uri: string): Promise<ResourcesReadResult> {
+	public async readResource(uri: string, meta?: Record<string, unknown>): Promise<ResourcesReadOutcome> {
 		const appName = this.resourceOwnership.get(uri);
 		if (!appName) {
 			throw new Error(`Unknown resource: ${uri}`);
@@ -220,10 +229,11 @@ export class ClientManager {
 
 		const unprefixed = unprefixName(uri);
 		const bareUri = unprefixed?.itemName ?? uri;
-		const result = await client.readResource(bareUri);
+		const { result, _meta } = await client.readResource(bareUri, meta);
 
-		// Re-prefix the returned URI so MCP clients see consistent prefixed URIs
-		return { ...result, uri: prefixName(appName, result.uri) };
+		// Re-prefix the returned URI so MCP clients see consistent prefixed URIs.
+		// `_meta` sits outside `result`, so this reshaping cannot drop it.
+		return { result: { ...result, uri: prefixName(appName, result.uri) }, _meta };
 	}
 
 	/**
@@ -314,6 +324,40 @@ export class ClientManager {
 	}
 
 	/**
+	 * Merges the connected apps' server info into the single identity the bridge advertises.
+	 *
+	 * Scalar fields come from the first responding app in registry order, falling back per-field
+	 * to {@link DEFAULT_SERVER_INFO} so that an app omitting `title`/`icons` does not strip the
+	 * bridge's own branding. Instructions are LLM-facing guidance, so none is discarded: a single
+	 * app's text is used verbatim, and several apps' are joined as labelled sections.
+	 * @param entries - Server info per responding app, in registry order.
+	 * @returns The merged server info, or the default when no app responded.
+	 */
+	private mergeServerInfo(entries: Array<[string, ServerInfo]>): ServerInfo {
+		const first = entries[0]?.[1];
+		if (!first) {
+			return DEFAULT_SERVER_INFO;
+		}
+
+		const withInstructions = entries.filter(([, info]) => info.instructions);
+		let instructions: string | undefined;
+		if (withInstructions.length === 1) {
+			// Single app: use the author's text exactly as written, with no added heading.
+			instructions = withInstructions[0]![1].instructions;
+		} else if (withInstructions.length > 1) {
+			instructions = withInstructions.map(([appName, info]) => `## ${appName}\n\n${info.instructions}`).join("\n\n");
+		}
+
+		return {
+			name: first.name,
+			version: first.version,
+			title: entries.find(([, info]) => info.title !== undefined)?.[1].title ?? DEFAULT_SERVER_INFO.title,
+			icons: entries.find(([, info]) => info.icons !== undefined)?.[1].icons ?? DEFAULT_SERVER_INFO.icons,
+			...(instructions !== undefined && { instructions }),
+		};
+	}
+
+	/**
 	 * Dispatches resource-changed notifications to all registered callbacks.
 	 */
 	private async notifyResourcesChanged(): Promise<void> {
@@ -348,6 +392,8 @@ export class ClientManager {
 		const newResources: Resource[] = [];
 		const newToolOwnership = new Map<string, string>();
 		const newResourceOwnership = new Map<string, string>();
+		// Ordered by the app registry, so the merged identity is deterministic.
+		const newServerInfos: Array<[string, ServerInfo]> = [];
 
 		for (const [appName, client] of this.clients) {
 			if (!client.isConnected) continue;
@@ -375,6 +421,15 @@ export class ClientManager {
 			} catch (error) {
 				log.error(`Failed to get resources from ${appName}:`, error);
 			}
+
+			try {
+				const info = await client.getServerInfo();
+				if (info) {
+					newServerInfos.push([appName, info]);
+				}
+			} catch (error) {
+				log.error(`Failed to get server info from ${appName}:`, error);
+			}
 		}
 
 		// Sort for deterministic ordering to reduce unnecessary change notifications
@@ -382,6 +437,7 @@ export class ClientManager {
 		this.cachedResources = newResources.sort((a, b) => a.uri.localeCompare(b.uri));
 		this.toolOwnership = newToolOwnership;
 		this.resourceOwnership = newResourceOwnership;
+		this.cachedServerInfo = this.mergeServerInfo(newServerInfos);
 	}
 
 	/**

@@ -2,8 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Mocked } from "vitest";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
-import type { ClientManager } from "../../ClientManager.js";
+import { ClientManager } from "../../ClientManager.js";
+import { IpcClient } from "../../IpcClient.js";
 import { McpBridge } from "../../McpBridge.js";
+import { MockServer } from "../helpers/MockServer.js";
+import { MockSocket } from "../helpers/MockSocket.js";
 import { MockTransport } from "../helpers/MockTransport.js";
 import {
 	createMockCallToolResponse,
@@ -401,7 +404,7 @@ describe("MCP Protocol Integration Tests", () => {
 				mimeType: "application/json",
 				content: { key: "value" },
 			};
-			mockClientManager.readResource.mockResolvedValue(resourceResult);
+			mockClientManager.readResource.mockResolvedValue({ result: resourceResult });
 
 			const server = bridge.createServer();
 			const transport = new MockTransport();
@@ -550,6 +553,111 @@ describe("MCP Protocol Integration Tests", () => {
 
 			expect(response).toHaveProperty("error");
 			expect((response as any).error.message).toContain("No Elgato apps connected");
+		});
+	});
+
+	describe("_meta round-trip over the full stack", () => {
+		// Unlike the rest of this file, these tests wire a real ClientManager and IpcClient
+		// on top of a MockSocket, so `_meta` is asserted on the actual IPC wire frame rather
+		// than on a mock call.
+		it("should carry request _meta to the IPC frame and result _meta back to the MCP client", async () => {
+			const socket = new MockSocket();
+			const ipcClient = new IpcClient(
+				{ name: "streamdeck", signalSocketPath: "/tmp/sd-ready.sock", socketPath: "/tmp/sd.sock" },
+				() => socket as any,
+				() => new MockServer() as any,
+			);
+			const manager = new ClientManager({ apps: [{ name: "streamdeck", socketBaseName: "sd" }] }, () => ipcClient);
+
+			// Answer every unanswered frame the bridge writes, recording it for later assertions.
+			const seen = new Set<string>();
+			const frames: any[] = [];
+			const pump = (): void => {
+				for (const chunk of socket.getWrittenData()) {
+					for (const line of chunk.split("\n").filter(Boolean)) {
+						const request = JSON.parse(line);
+						if (seen.has(request.id)) continue;
+						seen.add(request.id);
+						frames.push(request);
+
+						let result: unknown;
+						let responseMeta: unknown;
+						switch (request.method) {
+							case "server_info":
+								result = { name: "streamdeck", version: "1.0.0" };
+								break;
+							case "tools_list":
+								result = {
+									tools: [
+										{
+											name: "set_brightness",
+											inputSchema: { type: "object", properties: {} },
+											outputSchema: { type: "object", properties: { brightness: { type: "number" } } },
+										},
+									],
+								};
+								break;
+							case "resources_list":
+								result = { resources: [] };
+								break;
+							case "call_tool":
+								// `_meta` rides the envelope as a sibling of `result`, never inside it.
+								result = { brightness: 80 };
+								responseMeta = { durationMs: 12 };
+								break;
+							default:
+								continue;
+						}
+						socket.simulateData(
+							JSON.stringify({ id: request.id, result, ...(responseMeta !== undefined && { _meta: responseMeta }) }) +
+								"\n",
+						);
+					}
+				}
+			};
+			const drain = async (): Promise<void> => {
+				for (let i = 0; i < 20; i++) {
+					pump();
+					await wait(2);
+				}
+			};
+
+			const initialized = manager.initialize();
+			socket.simulateConnect();
+			await Promise.all([initialized, drain()]);
+			expect(manager.isConnected).toBe(true);
+
+			bridge = new McpBridge(manager);
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			const outgoing = transport.waitForOutgoingMessage();
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: {
+					name: "streamdeck__set_brightness",
+					arguments: { level: 80 },
+					_meta: { progressToken: 1, "vendor/trace": "t-1" },
+				},
+			});
+			await drain();
+			const response = await outgoing;
+
+			// Inbound: the client's `_meta` reached the app on the wire, with the prefix stripped
+			// from the tool name but the metadata untouched.
+			const callFrame = frames.find((f) => f.method === "call_tool");
+			expect(callFrame.toolName).toBe("set_brightness");
+			expect(callFrame._meta).toMatchObject({ progressToken: 1, "vendor/trace": "t-1" });
+
+			// Outbound: the app's envelope `_meta` reached the MCP client as top-level metadata,
+			// and never leaked into the structured payload.
+			expect((response as any).result._meta).toEqual({ durationMs: 12 });
+			expect((response as any).result.structuredContent).toEqual({ brightness: 80 });
+			expect("_meta" in (response as any).result.structuredContent).toBe(false);
+			expect((response as any).result.content[0].text).toBe(JSON.stringify({ brightness: 80 }, null, 2));
 		});
 	});
 

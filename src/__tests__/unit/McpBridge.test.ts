@@ -52,6 +52,58 @@ describe("McpBridge", () => {
 			expect(mockClientManager.getServerInfo).toHaveBeenCalled();
 		});
 
+		it("should surface the app's instructions in the initialize result", async () => {
+			mockClientManager.getServerInfo.mockReturnValue({
+				name: "Stream Deck MCP Server",
+				version: "7.3.0",
+				instructions: "Controls the Elgato Stream Deck desktop application.",
+			});
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "initialize",
+				params: {
+					protocolVersion: "2025-06-18",
+					capabilities: {},
+					clientInfo: { name: "test-client", version: "1.0.0" },
+				},
+			});
+
+			const response = await transport.waitForOutgoingMessage();
+			// Instructions belong in ServerOptions, and the SDK emits them on InitializeResult.
+			expect((response as any).result.instructions).toBe(
+				"Controls the Elgato Stream Deck desktop application.",
+			);
+			expect((response as any).result.serverInfo.name).toBe("Stream Deck MCP Server");
+		});
+
+		it("should omit instructions from the initialize result when the app supplies none", async () => {
+			mockClientManager.getServerInfo.mockReturnValue({ name: "Elgato MCP Server", version: "1.0.0" });
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "initialize",
+				params: {
+					protocolVersion: "2025-06-18",
+					capabilities: {},
+					clientInfo: { name: "test-client", version: "1.0.0" },
+				},
+			});
+
+			const response = await transport.waitForOutgoingMessage();
+			expect("instructions" in (response as any).result).toBe(false);
+		});
+
 		it("should create independent server instances each time", () => {
 			const server1 = bridge.createServer();
 			const server2 = bridge.createServer();
@@ -916,6 +968,301 @@ describe("McpBridge", () => {
 			expect((response as any).result.content[0].text).toContain("outputSchema");
 		});
 
+		it("should forward request _meta from tools/call to the client manager", async () => {
+			(mockClientManager as any).isConnected = true;
+			mockClientManager.callTool.mockResolvedValue({ id: "1", result: { ok: true } } as any);
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			const requestMeta = { progressToken: 5, "vendor/trace": "t-1" };
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: { name: "streamdeck__test_tool", arguments: { a: 1 }, _meta: requestMeta },
+			});
+
+			await transport.waitForOutgoingMessage();
+			// The correlation ID is generated per call, so match on the surrounding arguments.
+			expect(mockClientManager.callTool).toHaveBeenCalledWith(
+				"streamdeck__test_tool",
+				{ a: 1 },
+				expect.any(String),
+				expect.objectContaining(requestMeta),
+			);
+		});
+
+		it("should pass undefined _meta to the client manager when the client sent none", async () => {
+			(mockClientManager as any).isConnected = true;
+			mockClientManager.callTool.mockResolvedValue({ id: "1", result: { ok: true } } as any);
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: { name: "streamdeck__test_tool", arguments: {} },
+			});
+
+			await transport.waitForOutgoingMessage();
+			expect(mockClientManager.callTool.mock.calls[0]?.[3]).toBeUndefined();
+		});
+
+		it("should surface envelope _meta on the MCP result and keep structuredContent clean", async () => {
+			(mockClientManager as any).isConnected = true;
+			mockClientManager.getTools.mockReturnValue([
+				createMockTool({
+					name: "streamdeck__structured_tool",
+					outputSchema: { type: "object", properties: { status: { type: "string" } } },
+				}),
+			] as any);
+			// `_meta` is a sibling of `result` on the envelope, never inside the payload.
+			mockClientManager.callTool.mockResolvedValue({
+				id: "1",
+				result: { status: "ok" },
+				_meta: { durationMs: 12 },
+			} as any);
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: { name: "streamdeck__structured_tool", arguments: {} },
+			});
+
+			const response = await transport.waitForOutgoingMessage();
+			// Envelope metadata surfaces top-level; structuredContent must validate against the
+			// tool's outputSchema, so it must never gain a `_meta` key.
+			expect((response as any).result._meta).toEqual({ durationMs: 12 });
+			expect((response as any).result.structuredContent).toEqual({ status: "ok" });
+			expect("_meta" in (response as any).result.structuredContent).toBe(false);
+			expect((response as any).result.content[0].text).toBe(JSON.stringify({ status: "ok" }, null, 2));
+		});
+
+		it("should surface envelope _meta on the legacy path for tools without an outputSchema", async () => {
+			(mockClientManager as any).isConnected = true;
+			mockClientManager.getTools.mockReturnValue([createMockTool({ name: "streamdeck__plain_tool" })] as any);
+			mockClientManager.callTool.mockResolvedValue({
+				id: "1",
+				result: { status: "ok" },
+				_meta: { durationMs: 7 },
+			} as any);
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: { name: "streamdeck__plain_tool", arguments: {} },
+			});
+
+			const response = await transport.waitForOutgoingMessage();
+			expect((response as any).result._meta).toEqual({ durationMs: 7 });
+			expect((response as any).result.content[0].text).toBe(JSON.stringify({ status: "ok" }, null, 2));
+		});
+
+		it("should omit _meta from the MCP result when the app returned none", async () => {
+			(mockClientManager as any).isConnected = true;
+			mockClientManager.getTools.mockReturnValue([createMockTool({ name: "streamdeck__plain_tool" })] as any);
+			mockClientManager.callTool.mockResolvedValue({ id: "1", result: { status: "ok" } } as any);
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: { name: "streamdeck__plain_tool", arguments: {} },
+			});
+
+			const response = await transport.waitForOutgoingMessage();
+			expect("_meta" in (response as any).result).toBe(false);
+		});
+
+		it("should surface envelope _meta alongside a tool-level error", async () => {
+			(mockClientManager as any).isConnected = true;
+			mockClientManager.callTool.mockResolvedValue({
+				id: "1",
+				result: { error: "device offline" },
+				_meta: { retryAfterMs: 500 },
+			} as any);
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: { name: "streamdeck__test_tool", arguments: {} },
+			});
+
+			const response = await transport.waitForOutgoingMessage();
+			expect((response as any).result.isError).toBe(true);
+			expect((response as any).result._meta).toEqual({ retryAfterMs: 500 });
+		});
+
+		it.each([
+			["a string", "nope"],
+			["an array", [1, 2]],
+			["a number", 42],
+		])("should not forward envelope _meta when it is %s", async (_label, badMeta) => {
+			(mockClientManager as any).isConnected = true;
+			mockClientManager.getTools.mockReturnValue([createMockTool({ name: "streamdeck__plain_tool" })] as any);
+			mockClientManager.callTool.mockResolvedValue({ id: "1", result: { status: "ok" }, _meta: badMeta } as any);
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: { name: "streamdeck__plain_tool", arguments: {} },
+			});
+
+			const response = await transport.waitForOutgoingMessage();
+			// The spec types Result._meta as an object; forwarding a non-object would make
+			// strict clients reject the entire result, so it is dropped instead.
+			expect("_meta" in (response as any).result).toBe(false);
+			expect((response as any).result.content[0].text).toBe(JSON.stringify({ status: "ok" }, null, 2));
+		});
+
+		it("should surface envelope _meta alongside a top-level response error", async () => {
+			(mockClientManager as any).isConnected = true;
+			// A transport/app-level failure: `error` is set on the envelope instead of `result`.
+			// `_meta` is a property of the response, so it applies here too.
+			mockClientManager.callTool.mockResolvedValue({
+				id: "1",
+				error: { message: "device unreachable" },
+				_meta: { retryAfterMs: 250 },
+			} as any);
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: { name: "streamdeck__test_tool", arguments: {} },
+			});
+
+			const response = await transport.waitForOutgoingMessage();
+			expect((response as any).result.isError).toBe(true);
+			expect((response as any).result.content[0].text).toBe("device unreachable");
+			expect((response as any).result._meta).toEqual({ retryAfterMs: 250 });
+		});
+
+		it("should not forward a non-object envelope _meta on a top-level response error", async () => {
+			(mockClientManager as any).isConnected = true;
+			mockClientManager.callTool.mockResolvedValue({
+				id: "1",
+				error: { message: "device unreachable" },
+				_meta: "nope",
+			} as any);
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: { name: "streamdeck__test_tool", arguments: {} },
+			});
+
+			const response = await transport.waitForOutgoingMessage();
+			// The object-only guard applies on the error path exactly as on the success paths.
+			expect((response as any).result.isError).toBe(true);
+			expect("_meta" in (response as any).result).toBe(false);
+		});
+
+		it("should surface envelope _meta on an outputSchema-violation error", async () => {
+			(mockClientManager as any).isConnected = true;
+			mockClientManager.getTools.mockReturnValue([
+				createMockTool({
+					name: "streamdeck__structured_tool",
+					outputSchema: { type: "object", properties: {} },
+				}),
+			] as any);
+			// The app responded successfully; the bridge is the one turning a non-object payload
+			// into a tool error, so the app's metadata must not be discarded along the way.
+			mockClientManager.callTool.mockResolvedValue({
+				id: "1",
+				result: "just a string",
+				_meta: { durationMs: 4 },
+			} as any);
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: { name: "streamdeck__structured_tool", arguments: {} },
+			});
+
+			const response = await transport.waitForOutgoingMessage();
+			expect((response as any).result.isError).toBe(true);
+			expect((response as any).result.content[0].text).toContain("outputSchema");
+			expect((response as any).result._meta).toEqual({ durationMs: 4 });
+		});
+
+		it("should pass a tool payload's own _meta key through into structuredContent", async () => {
+			(mockClientManager as any).isConnected = true;
+			mockClientManager.getTools.mockReturnValue([
+				createMockTool({
+					name: "streamdeck__structured_tool",
+					outputSchema: { type: "object", properties: { _meta: { type: "object" } } },
+				}),
+			] as any);
+			// A tool whose outputSchema legitimately declares `_meta`: the bridge no longer
+			// reaches into the payload, so the key must survive intact.
+			const payload = { status: "ok", _meta: { thisIsPayload: true } };
+			mockClientManager.callTool.mockResolvedValue({
+				id: "1",
+				result: payload,
+				_meta: { durationMs: 3 },
+			} as any);
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "tools/call",
+				params: { name: "streamdeck__structured_tool", arguments: {} },
+			});
+
+			const response = await transport.waitForOutgoingMessage();
+			expect((response as any).result.structuredContent).toEqual(payload);
+			// The envelope's metadata is a separate thing from the payload's own key.
+			expect((response as any).result._meta).toEqual({ durationMs: 3 });
+		});
+
 		it("should return error on tools/call when disconnected", async () => {
 			(mockClientManager as any).isConnected = false;
 
@@ -979,9 +1326,11 @@ describe("McpBridge", () => {
 		it("should handle resources/read when connected", async () => {
 			(mockClientManager as any).isConnected = true;
 			mockClientManager.readResource.mockResolvedValue({
-				uri: "streamdeck__test://resource",
-				mimeType: "application/json",
-				content: { key: "value" },
+				result: {
+					uri: "streamdeck__test://resource",
+					mimeType: "application/json",
+					content: { key: "value" },
+				},
 			});
 
 			const server = bridge.createServer();
@@ -998,6 +1347,39 @@ describe("McpBridge", () => {
 			const response = await transport.waitForOutgoingMessage();
 			expect((response as any).result.contents).toHaveLength(1);
 			expect((response as any).result.contents[0].uri).toBe("streamdeck__test://resource");
+		});
+
+		it("should forward request _meta on resources/read and surface result _meta", async () => {
+			(mockClientManager as any).isConnected = true;
+			mockClientManager.readResource.mockResolvedValue({
+				result: {
+					uri: "streamdeck__test://resource",
+					mimeType: "application/json",
+					content: { key: "value" },
+				},
+				_meta: { cachedAt: "2026-09-02" },
+			});
+
+			const server = bridge.createServer();
+			const transport = new MockTransport();
+			await server.connect(transport);
+
+			const requestMeta = { progressToken: "p-2" };
+			transport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 1,
+				method: "resources/read",
+				params: { uri: "streamdeck__test://resource", _meta: requestMeta },
+			});
+
+			const response = await transport.waitForOutgoingMessage();
+			expect(mockClientManager.readResource).toHaveBeenCalledWith(
+				"streamdeck__test://resource",
+				expect.objectContaining(requestMeta),
+			);
+			expect((response as any).result._meta).toEqual({ cachedAt: "2026-09-02" });
+			// Metadata belongs on the result, never inside the contents items.
+			expect("_meta" in (response as any).result.contents[0]).toBe(false);
 		});
 
 		it("should throw error on resources/read when disconnected", async () => {
@@ -1144,6 +1526,115 @@ describe("McpBridge", () => {
 
 				expect(result).toEqual({ action: "decline" });
 			}
+		});
+
+		it("should carry _meta both ways across an elicitation round-trip", async () => {
+			(mockClientManager as any).isConnected = true;
+			mockClientManager.getTools.mockReturnValue([createMockTool()] as any);
+
+			let resolveToolCall!: () => void;
+			const toolCallPromise = new Promise<void>((resolve) => {
+				resolveToolCall = resolve;
+			});
+			mockClientManager.callTool.mockImplementation(async (): Promise<any> => {
+				await toolCallPromise;
+				return { id: "1", result: { success: true } };
+			});
+
+			const mcpServer = bridge.createServer();
+			// Per the spec's `ElicitResult extends Result`, the client may attach its own `_meta`.
+			const mockElicitInput = vi.fn<(params: any) => Promise<any>>().mockResolvedValue({
+				action: "accept",
+				content: { username: "testuser" },
+				_meta: { "vendor/client": "claude" },
+			});
+			(mcpServer.server as any).elicitInput = mockElicitInput;
+
+			const mockTransport = new MockTransport();
+			mockTransport.sessionId = "test-session-meta";
+			await mcpServer.connect(mockTransport);
+
+			mockTransport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 42,
+				method: "tools/call",
+				params: { name: "streamdeck__test_tool", arguments: {} },
+			});
+			await wait(50);
+
+			const capturedCorrelationId = mockClientManager.callTool.mock.calls[0]?.[2];
+			const onElicitationCallback = mockClientManager.onElicitation.mock.calls[0]?.[0];
+			expect(onElicitationCallback).toBeDefined();
+
+			if (onElicitationCallback) {
+				const appMeta = { progressToken: 3, "vendor/trace": "e-1" };
+				const elicitationResult = await onElicitationCallback({
+					message: "Enter credentials",
+					mode: "form",
+					requestedSchema: { type: "object", properties: { username: { type: "string" } } },
+					relatedToolCallId: capturedCorrelationId as string,
+					_meta: appMeta,
+				});
+
+				// Outbound: the app's params._meta reaches the MCP client.
+				expect(mockElicitInput).toHaveBeenCalledWith(expect.objectContaining({ _meta: appMeta }));
+				// Inbound: the client's ElicitResult._meta comes back on the IPC response.
+				expect(elicitationResult).toEqual({
+					action: "accept",
+					content: { username: "testuser" },
+					_meta: { "vendor/client": "claude" },
+				});
+			}
+
+			resolveToolCall();
+		});
+
+		it("should omit _meta from the elicitation request when the app sent none", async () => {
+			(mockClientManager as any).isConnected = true;
+			mockClientManager.getTools.mockReturnValue([createMockTool()] as any);
+
+			let resolveToolCall!: () => void;
+			const toolCallPromise = new Promise<void>((resolve) => {
+				resolveToolCall = resolve;
+			});
+			mockClientManager.callTool.mockImplementation(async (): Promise<any> => {
+				await toolCallPromise;
+				return { id: "1", result: { success: true } };
+			});
+
+			const mcpServer = bridge.createServer();
+			const mockElicitInput = vi.fn<(params: any) => Promise<any>>().mockResolvedValue({ action: "cancel" });
+			(mcpServer.server as any).elicitInput = mockElicitInput;
+
+			const mockTransport = new MockTransport();
+			mockTransport.sessionId = "test-session-nometa";
+			await mcpServer.connect(mockTransport);
+
+			mockTransport.simulateIncomingMessage({
+				jsonrpc: "2.0" as const,
+				id: 43,
+				method: "tools/call",
+				params: { name: "streamdeck__test_tool", arguments: {} },
+			});
+			await wait(50);
+
+			const capturedCorrelationId = mockClientManager.callTool.mock.calls[0]?.[2];
+			const onElicitationCallback = mockClientManager.onElicitation.mock.calls[0]?.[0];
+
+			if (onElicitationCallback) {
+				const elicitationResult = await onElicitationCallback({
+					message: "Enter credentials",
+					mode: "form",
+					requestedSchema: { type: "object", properties: {} },
+					relatedToolCallId: capturedCorrelationId as string,
+				});
+
+				expect("_meta" in mockElicitInput.mock.calls[0]![0]).toBe(false);
+				// A client result without _meta must not gain an explicit undefined key.
+				expect("_meta" in elicitationResult).toBe(false);
+			}
+
+			resolveToolCall();
 		});
 
 		it("should forward elicitation to active MCP server during tool call and return response", async () => {
