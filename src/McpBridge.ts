@@ -276,8 +276,16 @@ export class McpBridge {
 				const metaFields = this.toResultMeta(response._meta, name);
 
 				if (response.error) {
+					// `CallToolResult` has no slot for JSON-RPC `error.data`, and the text block is the
+					// only channel LLM-facing clients reliably surface, so `data` is copied after the
+					// message: strings verbatim, anything else as compact JSON.
+					const { message, data } = response.error;
+					const text =
+						data === undefined || data === null
+							? message
+							: `${message}\n${typeof data === "string" ? data : JSON.stringify(data)}`;
 					return {
-						content: [{ type: "text", text: response.error.message }],
+						content: [{ type: "text", text }],
 						isError: true,
 						...metaFields,
 					};

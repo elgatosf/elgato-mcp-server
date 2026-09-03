@@ -62,7 +62,7 @@ export function createMockToolsListResponse(tools: McpTool[] = []): ToolsListRes
  */
 export function createMockCallToolResponse(
 	result: { success: boolean; data?: unknown; error?: string } = { success: true },
-	error?: { message: string; data?: string },
+	error?: { message: string; data?: unknown },
 ): CallToolResponse {
 	return {
 		id: "1",
@@ -74,7 +74,7 @@ export function createMockCallToolResponse(
 /**
  * Creates a mock error response.
  */
-export function createMockErrorResponse(message: string, data?: string): CallToolResponse {
+export function createMockErrorResponse(message: string, data?: unknown): CallToolResponse {
 	return {
 		id: "1",
 		error: {

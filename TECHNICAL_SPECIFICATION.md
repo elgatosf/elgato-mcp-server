@@ -299,6 +299,23 @@ else, so a non-object value is dropped and logged at debug level rather than pas
 }
 ```
 
+For an app-level error (`error` on the IPC envelope) the text is the error `message`, followed on
+the next line by `error.data` when the app sent one: strings verbatim, any other JSON value
+compact-serialized. `CallToolResult` has no field for JSON-RPC error data, and the text block is
+the only channel LLM-facing clients reliably pass to the model, so the bridge copies it there:
+
+```json
+{
+    "content": [
+        {
+            "type": "text",
+            "text": "error: missing_session_id\nCall session_create(...) first.\n{\"code\":\"missing_session_id\"}"
+        }
+    ],
+    "isError": true
+}
+```
+
 Envelope `_meta` is surfaced on **error** results too, since it is a property of the response
 rather than of the payload. That covers a tool-level error (`result.error`), an app-level error
 (`error` on the envelope), and the bridge's own outputSchema-violation error — in the last case
@@ -694,9 +711,12 @@ and there is no defined merge policy for combining several apps' metadata.
 ```json
 {
     "id": "3",
-    "error": { "message": "Error description", "data": "..." }
+    "error": { "message": "error: missing_session_id\n<text>", "data": { "code": "missing_session_id" } }
 }
 ```
+
+`data` is optional and may be any JSON value; the Stream Deck app sends `{ "code": string }`.
+The bridge appends it to the `tools/call` error text (see the error result section above).
 
 ### 4.4 Socket Paths
 
@@ -1278,10 +1298,10 @@ interface RequestBase {
     method: string;
 }
 
-// Error structure
+// Error structure (JSON-RPC style error object on the IPC envelope)
 interface McpError {
     message: string;
-    data?: string;
+    data?: unknown; // any JSON value; appended to the tool error text by the bridge
 }
 
 // Icon structure

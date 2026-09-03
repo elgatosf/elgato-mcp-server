@@ -55,11 +55,15 @@ export interface ResourcesReadRequest extends RequestBase {
 }
 
 /**
- * Error structure for MCP responses.
+ * Error structure for IPC responses, mirroring the JSON-RPC error object.
  */
 export interface McpError {
 	message: string;
-	data?: string;
+	/**
+	 * Free-form detail, any JSON value (the Stream Deck app sends `{ code: string }`).
+	 * Surfaced to MCP clients by appending it to the tool error text.
+	 */
+	data?: unknown;
 }
 
 /**

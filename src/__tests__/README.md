@@ -8,7 +8,7 @@ This directory contains comprehensive test coverage for the Elgato MCP Server pr
 | ----------- | ------------------------- |
 | Build       | ✅ Passing                |
 | Test Suites | 12 of 12 passing (100%)   |
-| Tests       | 355 of 355 passing (100%) |
+| Tests       | 357 of 357 passing (100%) |
 | Skipped     | 0 tests                   |
 
 ### Coverage Metrics
@@ -112,7 +112,7 @@ pnpm test:ci           # Run tests in CI/CD mode
 - `server_info` merging: per-field fallback to the defaults, single-app instructions verbatim vs
   multi-app labelled sections, isolation when one app's fetch fails, and refresh on reconnect
 
-#### McpBridge.test.ts (74 tests)
+#### McpBridge.test.ts (76 tests)
 
 - Initialization (connected and disconnected modes)
 - Server creation with custom info
@@ -130,6 +130,8 @@ pnpm test:ci           # Run tests in CI/CD mode
   key survives into `structuredContent` untouched
 - Envelope `_meta` on error results: app-level (`response.error`) and outputSchema-violation
   errors, with the object-only guard still applied
+- Envelope `error.data` on `tools/call` errors: appended to the text on a new line (object as
+  compact JSON, string verbatim), forwarded together with envelope `_meta`
 - Elicitation `_meta` round-trip: `params._meta` reaching `elicitInput`, `ElicitResult._meta`
   returning on the IPC response, and neither key appearing when absent
 - `InitializeResult.instructions` driven through a real `initialize` request, present when the
