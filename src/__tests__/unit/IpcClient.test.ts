@@ -203,6 +203,21 @@ describe("IpcClient", () => {
 			// Client should still be connected
 			expect(client.isConnected).toBe(true);
 		});
+
+		it.each([
+			{ char: "日", splitAfter: 1 },
+			{ char: "🎛️", splitAfter: 2 },
+		])("should keep $char intact when its UTF-8 bytes are split across chunks", async ({ char, splitAfter }) => {
+			const infoPromise = client.getServerInfo();
+			const { id } = JSON.parse(mockSocket.getLastWritten()!) as { id: string };
+			const bytes = Buffer.from(JSON.stringify({ id, result: { name: `Deck ${char}`, version: "1.0.0" } }) + "\n");
+			const splitAt = bytes.indexOf(Buffer.from(char)) + splitAfter;
+
+			mockSocket.emit("data", bytes.subarray(0, splitAt));
+			mockSocket.emit("data", bytes.subarray(splitAt));
+
+			await expect(infoPromise).resolves.toEqual({ name: `Deck ${char}`, version: "1.0.0" });
+		});
 	});
 
 	describe("request/response correlation", () => {
@@ -805,6 +820,21 @@ describe("IpcClient", () => {
 			);
 			expect(parseErrors).toHaveLength(0);
 			await expect(toolsPromise).resolves.toEqual([{ name: "t", description: blob, inputSchema: {} }]);
+		});
+
+		it("should not carry a partial UTF-8 character from a closed socket into the next one", async () => {
+			await connectFirstSocket();
+			sockets[0]!.emit("data", Buffer.from("日").subarray(0, 1));
+			sockets[0]!.simulateClose();
+			const reconnecting = client.connect(100);
+			sockets[1]!.simulateConnect();
+			await reconnecting;
+
+			const infoPromise = client.getServerInfo();
+			const { id } = JSON.parse(sockets[1]!.getLastWritten()!) as { id: string };
+			sockets[1]!.simulateData(JSON.stringify({ id, result: { name: "Deck", version: "1.0.0" } }) + "\n");
+
+			await expect(infoPromise).resolves.toEqual({ name: "Deck", version: "1.0.0" });
 		});
 
 		describe("events from a replaced socket", () => {

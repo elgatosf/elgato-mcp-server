@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as net from "node:net";
+import { StringDecoder } from "node:string_decoder";
 
 import {
 	ELICITATION_TIMEOUT_MS,
@@ -337,8 +338,8 @@ export class IpcClient {
 		}
 	}
 
-	private handleData(data: Buffer | string): void {
-		this.buffer += typeof data === "string" ? data : data.toString();
+	private handleData(chunk: string): void {
+		this.buffer += chunk;
 
 		if (this.buffer.length > MAX_BUFFER_SIZE) {
 			log.error("Buffer overflow, clearing buffer");
@@ -715,8 +716,10 @@ export class IpcClient {
 	 * @param socket - The socket to bind the handlers to.
 	 */
 	private setupSocketHandlers(socket: net.Socket): void {
-		socket.on("data", (data) => {
-			if (socket === this.socket) this.handleData(data);
+		// One decoder per socket, so a multi-byte UTF-8 character split across chunks is decoded whole.
+		const decoder = new StringDecoder("utf8");
+		socket.on("data", (data: Buffer | string) => {
+			if (socket === this.socket) this.handleData(typeof data === "string" ? data : decoder.write(data));
 		});
 		socket.on("close", () => this.handleClose(socket));
 		socket.on("error", (error) => {
