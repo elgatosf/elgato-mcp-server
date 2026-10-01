@@ -41,6 +41,8 @@ export class ClientManager {
 	private notifyToolsChangedCallbacks: Array<() => Promise<void>> = [];
 	private readonly onClientConnectedCallbacks: Array<(name: string) => void> = [];
 	private readonly onClientDisconnectedCallbacks: Array<(name: string) => void> = [];
+	private refreshInFlight: Promise<void> | null = null;
+	private refreshQueued: Promise<void> | null = null;
 	private resourceOwnership: Map<string, string> = new Map();
 	private toolOwnership: Map<string, string> = new Map();
 
@@ -384,10 +386,37 @@ export class ClientManager {
 	}
 
 	/**
-	 * Re-fetches tools and resources from all connected clients and updates the
-	 * internal cache and ownership maps.
+	 * Re-fetches tools and resources from all connected clients, one round at a time.
+	 *
+	 * A call while a round runs queues exactly one more round, because the running round may have
+	 * read data that is already old. All calls made during that round share the queued one, so a
+	 * burst of list-changed notifications causes at most one extra round.
+	 * @returns A promise that resolves once the cache reflects the state at the time of the call.
 	 */
-	private async refreshAll(): Promise<void> {
+	private refreshAll(): Promise<void> {
+		if (!this.refreshInFlight) {
+			this.refreshInFlight = this.refreshOnce().finally(() => {
+				this.refreshInFlight = null;
+			});
+			return this.refreshInFlight;
+		}
+
+		this.refreshQueued ??= this.refreshInFlight
+			.catch(() => {
+				// The callers of the running round handle its error.
+			})
+			.then(() => {
+				this.refreshQueued = null;
+				return this.refreshAll();
+			});
+		return this.refreshQueued;
+	}
+
+	/**
+	 * Runs one refresh round: re-fetches tools and resources from all connected clients and updates
+	 * the internal cache and ownership maps.
+	 */
+	private async refreshOnce(): Promise<void> {
 		const newTools: Tool[] = [];
 		const newResources: Resource[] = [];
 		const newToolOwnership = new Map<string, string>();
