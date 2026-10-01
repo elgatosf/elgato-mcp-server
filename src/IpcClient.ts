@@ -135,6 +135,8 @@ export class IpcClient {
 	public disconnect(): void {
 		this.socket?.destroy();
 		this.socket = null;
+		// The socket's "close" event fires later and is ignored, so fail in-flight requests now.
+		this.rejectPendingRequests();
 		this.signalServer?.close();
 		this.signalServer = null;
 
@@ -260,6 +262,22 @@ export class IpcClient {
 	}
 
 	/**
+	 * Makes the given socket the current one. A previous socket is closed, and requests written to it fail.
+	 * @param socket - The newly connected socket.
+	 */
+	private attachSocket(socket: net.Socket): void {
+		const previous = this.socket;
+		this.socket = socket;
+		this.buffer = "";
+		this.setupSocketHandlers(socket);
+
+		if (previous && previous !== socket) {
+			this.rejectPendingRequests();
+			previous.destroy();
+		}
+	}
+
+	/**
 	 * Creates a timeout that rejects a pending request after the specified duration.
 	 * @param requestId - The ID of the request to timeout.
 	 * @param reject - The reject function from the request's promise.
@@ -289,15 +307,19 @@ export class IpcClient {
 		return true;
 	}
 
-	private handleClose(): void {
+	/**
+	 * Handles the close of a socket. Only the current socket resets the connection state;
+	 * a replaced socket that closes late must not tear down the live one.
+	 * @param socket - The socket that closed.
+	 */
+	private handleClose(socket: net.Socket): void {
+		if (socket !== this.socket) {
+			return;
+		}
+
 		this.socket = null;
 		this.buffer = "";
-
-		for (const [id, pending] of this.pendingRequests) {
-			clearTimeout(pending.timeout);
-			pending.reject(new Error("Connection closed"));
-			this.pendingRequests.delete(id);
-		}
+		this.rejectPendingRequests();
 
 		// Notify that we've disconnected
 		if (this.onDisconnectedCallback) {
@@ -549,8 +571,7 @@ export class IpcClient {
 
 			socket.on("connect", () => {
 				clearTimeout(timeoutId);
-				this.socket = socket;
-				this.setupSocketHandlers();
+				this.attachSocket(socket);
 				resolve(true);
 			});
 
@@ -585,6 +606,17 @@ export class IpcClient {
 			}
 		} catch (error) {
 			log.error("Failed to parse message:", error);
+		}
+	}
+
+	/**
+	 * Fails all pending requests. Their responses can no longer arrive on the current socket.
+	 */
+	private rejectPendingRequests(): void {
+		for (const [id, pending] of this.pendingRequests) {
+			clearTimeout(pending.timeout);
+			pending.reject(new Error("Connection closed"));
+			this.pendingRequests.delete(id);
 		}
 	}
 
@@ -642,12 +674,19 @@ export class IpcClient {
 		});
 	}
 
-	private setupSocketHandlers(): void {
-		if (!this.socket) return;
-
-		this.socket.on("data", (data) => this.handleData(data));
-		this.socket.on("close", () => this.handleClose());
-		this.socket.on("error", (error) => this.handleError(error));
+	/**
+	 * Binds the data, close and error handlers to one socket. Events from a socket that is
+	 * no longer the current one are ignored, so a stale stream can never reach the shared buffer.
+	 * @param socket - The socket to bind the handlers to.
+	 */
+	private setupSocketHandlers(socket: net.Socket): void {
+		socket.on("data", (data) => {
+			if (socket === this.socket) this.handleData(data);
+		});
+		socket.on("close", () => this.handleClose(socket));
+		socket.on("error", (error) => {
+			if (socket === this.socket) this.handleError(error);
+		});
 	}
 
 	/**

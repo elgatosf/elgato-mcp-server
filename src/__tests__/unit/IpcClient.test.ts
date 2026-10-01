@@ -759,6 +759,88 @@ describe("IpcClient", () => {
 			expect(parseErrors).toHaveLength(0);
 			await expect(toolsPromise).resolves.toEqual([{ name: "t", description: blob, inputSchema: {} }]);
 		});
+
+		describe("events from a replaced socket", () => {
+			/**
+			 * Replaces the first socket with a second one. The first socket is destroyed, but its
+			 * "close" event has not fired yet (Node emits it asynchronously).
+			 */
+			async function replaceFirstSocket(): Promise<void> {
+				await connectFirstSocket();
+				sockets[0]!.destroyed = true;
+				const reconnecting = client.connect(100);
+				sockets[1]!.simulateConnect();
+				await reconnecting;
+			}
+
+			/**
+			 * Answers the last request written to the given socket.
+			 */
+			function respond(socket: MockSocket, result: unknown): void {
+				const { id } = JSON.parse(socket.getLastWritten()!) as { id: string };
+				socket.simulateData(JSON.stringify({ id, result }) + "\n");
+			}
+
+			it("should ignore late data from a replaced socket", async () => {
+				await replaceFirstSocket();
+				const infoPromise = client.getServerInfo();
+				infoPromise.catch(() => {});
+
+				sockets[0]!.emit("data", Buffer.from('{"id":"stale","result":{"na'));
+				respond(sockets[1]!, { name: "Current", version: "1.0.0" });
+
+				const parseErrors = consoleErrorSpy.mock.calls.filter((args: unknown[]) =>
+					args.includes("Failed to parse message:"),
+				);
+				expect(parseErrors).toHaveLength(0);
+				await expect(infoPromise).resolves.toEqual({ name: "Current", version: "1.0.0" });
+			});
+
+			it("should keep the current connection and its requests when a replaced socket closes late", async () => {
+				const onDisconnected = vi.fn();
+				client.onDisconnected(onDisconnected);
+				await replaceFirstSocket();
+				const infoPromise = client.getServerInfo();
+				infoPromise.catch(() => {});
+
+				sockets[0]!.emit("close");
+
+				expect(client.isConnected).toBe(true);
+				expect(onDisconnected).not.toHaveBeenCalled();
+				respond(sockets[1]!, { name: "Current", version: "1.0.0" });
+				await expect(infoPromise).resolves.toEqual({ name: "Current", version: "1.0.0" });
+			});
+
+			it("should close a replaced socket and fail the requests sent on it", async () => {
+				await connectFirstSocket();
+				const stalePromise = client.getServerInfo();
+				stalePromise.catch(() => {});
+				const destroySpy = vi.spyOn(sockets[0]!, "destroy");
+				sockets[0]!.destroyed = true;
+
+				const reconnecting = client.connect(100);
+				sockets[1]!.simulateConnect();
+				await reconnecting;
+
+				expect(destroySpy).toHaveBeenCalled();
+				await expect(Promise.race([stalePromise, wait(50).then(() => "pending")])).rejects.toThrow("Connection closed");
+			});
+		});
+
+		it("should fail in-flight requests on disconnect() even before the socket emits close", async () => {
+			await connectFirstSocket();
+			const infoPromise = client.getServerInfo();
+			infoPromise.catch(() => {});
+			// Node emits "close" asynchronously after destroy().
+			vi.spyOn(sockets[0]!, "destroy").mockImplementation(() => {
+				sockets[0]!.destroyed = true;
+				return sockets[0]!;
+			});
+
+			client.disconnect();
+
+			await expect(Promise.race([infoPromise, wait(50).then(() => "pending")])).rejects.toThrow("Connection closed");
+		});
 	});
 
 	describe("onConnected callback", () => {
