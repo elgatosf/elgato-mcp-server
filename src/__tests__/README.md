@@ -30,17 +30,18 @@ src/__tests__/
 │   ├── MockServer.ts                     # Mock implementation of net.Server
 │   ├── MockTransport.ts                  # Mock implementation of MCP Transport
 │   └── testUtils.ts                      # Helper functions for creating test data
-├── unit/                                 # Unit tests (8 test files, 253 tests)
+├── unit/                                 # Unit tests (8 test files, 312 tests)
 │   ├── constants.test.ts                 # Socket path generation tests (6 tests)
 │   ├── utils.test.ts                     # Utility functions tests (45 tests)
-│   ├── IpcClient.test.ts                 # IPC client tests (74 tests, includes elicitation)
-│   ├── ClientManager.test.ts             # Client manager aggregation tests (52 tests)
-│   ├── McpBridge.test.ts                 # MCP bridge logic tests (74 tests, includes elicitation)
+│   ├── IpcClient.test.ts                 # IPC client tests (95 tests, includes elicitation)
+│   ├── ClientManager.test.ts             # Client manager aggregation tests (54 tests)
+│   ├── McpBridge.test.ts                 # MCP bridge logic tests (76 tests, includes elicitation)
 │   ├── stdio.test.ts                     # stdio transport lifecycle tests (10 tests)
 │   ├── http-server-startup.test.ts       # HTTP server initialization tests (5 tests)
 │   └── http-session-timeout.test.ts      # HTTP session timeout tests (21 tests)
-└── integration/                          # Integration tests (4 test files, 67 tests)
+└── integration/                          # Integration tests (5 test files, 70 tests)
     ├── transports.test.ts                # Stdio and HTTP transport tests
+    ├── ipc-signal-socket.test.ts         # Signal socket over real Unix sockets (2 tests)
     ├── mcp-protocol.test.ts              # MCP protocol endpoint tests (32 tests)
     ├── http-cors.test.ts                 # CORS handling tests
     └── http-session-lifecycle.test.ts    # Session lifecycle tests
@@ -82,7 +83,7 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Resource conversion (`convertToMcpResources`)
 - Plain-object classification (`isPlainObject`)
 
-#### IpcClient.test.ts (74 tests)
+#### IpcClient.test.ts (95 tests)
 
 - Connection lifecycle (connect, disconnect, timeout, errors)
 - Message parsing and buffer processing
@@ -93,14 +94,25 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Timeout handling
 - Error response handling
 - API methods (getServerInfo, getTools, callTool)
-- Signal listener functionality
+- Signal listener functionality: ready signal on close, on other data, on error, or after a silent
+  250 ms; probe marker ignored, also when it arrives in several chunks; no reconnect when
+  `disconnect()` closes an open signal connection
+- Single live socket: no second socket for a ready signal while connected, one attempt for parallel
+  `connect()` calls and repeated signals, a retry when a signal arrives during a failed attempt, and
+  a regression for the reported bug (two sockets each sending 40 KiB lines in alternating 8 KiB
+  chunks must not cause parse errors)
+- Events from a replaced socket: late `data` and `close` are ignored, the replaced socket is
+  closed and its requests fail; `disconnect()` fails in-flight requests before `close` fires and
+  does not report a disconnection
+- UTF-8 characters (`日`, `🎛️`) split across chunks stay intact; a partial character never
+  carries over to the next socket
 - Notification handling (type guards, multiple callbacks, error isolation)
 - Resources API (getResources, readResource)
 - Request `_meta` forwarding on `call_tool` / `resources_read`, and omission of the key when absent
 - Envelope `_meta` (sibling of `result`) surfacing on the `resources_read` outcome
 - Elicitation handling (type guard, callback registration, response handling, timeout, error handling)
 
-#### ClientManager.test.ts (52 tests)
+#### ClientManager.test.ts (54 tests)
 
 - Multi-client aggregation of tools and resources
 - `appname__` prefix application and stripping
@@ -111,6 +123,8 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Pass-through of request `_meta` to the owning client, and of envelope `_meta` back to the caller across URI re-prefixing
 - `server_info` merging: per-field fallback to the defaults, single-app instructions verbatim vs
   multi-app labelled sections, isolation when one app's fetch fails, and refresh on reconnect
+- Refresh serialization: a burst of list_changed notifications runs at most one extra refresh, and
+  each caller is notified after a refresh that started after its notification (no stale overwrite)
 
 #### McpBridge.test.ts (76 tests)
 
@@ -174,6 +188,13 @@ pnpm test:ci           # Run tests in CI/CD mode
 - Stream Deck crash mid-session
 - Reconnection handling
 - Callback notifications on reconnection
+
+#### ipc-signal-socket.test.ts (2 tests)
+
+Real Unix sockets for the signal socket (skipped on Windows, where the probe path does not run):
+
+- A second bridge's startup probe does not make the owning bridge open a socket to the app
+- The app's ready signal (connect, then close) still makes the owner connect
 
 #### mcp-protocol.test.ts (32 tests)
 

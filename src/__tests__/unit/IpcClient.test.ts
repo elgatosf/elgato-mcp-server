@@ -1,6 +1,11 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { RECONNECT_POLL_INTERVAL_MS, REQUEST_TIMEOUT_MS } from "../../constants.js";
+import {
+	RECONNECT_POLL_INTERVAL_MS,
+	REQUEST_TIMEOUT_MS,
+	SIGNAL_PROBE_MARKER,
+	SIGNAL_SETTLE_TIMEOUT_MS,
+} from "../../constants.js";
 import { IpcClient } from "../../IpcClient.js";
 import type { ElicitationCallback, IpcClientConfig } from "../../types.js";
 import { setVerbose } from "../../utils.js";
@@ -197,6 +202,21 @@ describe("IpcClient", () => {
 
 			// Client should still be connected
 			expect(client.isConnected).toBe(true);
+		});
+
+		it.each([
+			{ char: "日", splitAfter: 1 },
+			{ char: "🎛️", splitAfter: 2 },
+		])("should keep $char intact when its UTF-8 bytes are split across chunks", async ({ char, splitAfter }) => {
+			const infoPromise = client.getServerInfo();
+			const { id } = JSON.parse(mockSocket.getLastWritten()!) as { id: string };
+			const bytes = Buffer.from(JSON.stringify({ id, result: { name: `Deck ${char}`, version: "1.0.0" } }) + "\n");
+			const splitAt = bytes.indexOf(Buffer.from(char)) + splitAfter;
+
+			mockSocket.emit("data", bytes.subarray(0, splitAt));
+			mockSocket.emit("data", bytes.subarray(splitAt));
+
+			await expect(infoPromise).resolves.toEqual({ name: `Deck ${char}`, version: "1.0.0" });
 		});
 	});
 
@@ -605,9 +625,10 @@ describe("IpcClient", () => {
 			// Verify server is listening
 			expect(mockServer.isListening()).toBe(true);
 
-			// Simulate signal connection
+			// Simulate the app's signal: it connects to the signal socket and closes it
 			const signalSocket = new MockSocket();
 			mockServer.simulateConnection(signalSocket as any);
+			signalSocket.emit("end");
 
 			// Wait a bit for async operations
 			await wait(50);
@@ -625,6 +646,345 @@ describe("IpcClient", () => {
 
 			// Verify the callback was called
 			expect(callbackCalled).toBe(true);
+		});
+		it("should treat a signal connection that stays open without data as a ready signal", async () => {
+			vi.useFakeTimers();
+			try {
+				const connectSpy = vi.spyOn(client, "connect");
+				client.startSignalListener();
+
+				const signalSocket = new MockSocket();
+				mockServer.simulateConnection(signalSocket as any);
+				await vi.advanceTimersByTimeAsync(SIGNAL_SETTLE_TIMEOUT_MS);
+
+				expect(connectSpy).toHaveBeenCalledTimes(1);
+				expect(signalSocket.ended).toBe(true);
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("should ignore a signal connection that starts with the probe marker", async () => {
+			const connectSpy = vi.spyOn(client, "connect");
+			client.startSignalListener();
+
+			const probe = new MockSocket();
+			mockServer.simulateConnection(probe as any);
+			probe.simulateData(SIGNAL_PROBE_MARKER);
+			probe.emit("end");
+			await wait(10);
+
+			expect(connectSpy).not.toHaveBeenCalled();
+			expect(probe.ended).toBe(true);
+		});
+
+		it("should ignore a probe marker that arrives in several chunks", async () => {
+			const connectSpy = vi.spyOn(client, "connect");
+			client.startSignalListener();
+
+			const probe = new MockSocket();
+			mockServer.simulateConnection(probe as any);
+			probe.simulateData("pro");
+			probe.simulateData("be\n");
+			probe.emit("end");
+			await wait(10);
+
+			expect(connectSpy).not.toHaveBeenCalled();
+			expect(probe.ended).toBe(true);
+		});
+
+		it.each([
+			{ name: "sends data other than the probe marker", emit: (s: MockSocket) => s.simulateData("ready\n") },
+			{
+				name: "starts like the probe marker and then differs",
+				emit: (s: MockSocket) => {
+					s.simulateData("pro");
+					s.simulateData("xy");
+				},
+			},
+			{ name: "fails with an error", emit: (s: MockSocket) => s.simulateError(new Error("ECONNRESET")) },
+		])("should treat a signal connection that $name as a ready signal", async ({ emit }) => {
+			const connectSpy = vi.spyOn(client, "connect");
+			client.startSignalListener();
+
+			const signalSocket = new MockSocket();
+			mockServer.simulateConnection(signalSocket as any);
+			emit(signalSocket);
+			await wait(10);
+
+			expect(connectSpy).toHaveBeenCalledTimes(1);
+		});
+
+		it("should not connect when disconnect() closes a signal connection that is still open", async () => {
+			const connectSpy = vi.spyOn(client, "connect");
+			client.startSignalListener();
+			mockServer.simulateConnection(new MockSocket() as any);
+
+			client.disconnect();
+			await wait(SIGNAL_SETTLE_TIMEOUT_MS + 50);
+
+			expect(connectSpy).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("single live socket", () => {
+		let sockets: MockSocket[];
+		let signalServer: MockServer;
+
+		/**
+		 * Simulates the app's ready signal: it connects to the signal socket and closes it.
+		 */
+		function sendReadySignal(): void {
+			const signal = new MockSocket();
+			signalServer.simulateConnection(signal as any);
+			signal.emit("end");
+		}
+
+		/**
+		 * Connects the client through the first socket the factory returns.
+		 */
+		async function connectFirstSocket(): Promise<void> {
+			const connecting = client.connect(100);
+			sockets[0]!.simulateConnect();
+			await connecting;
+		}
+
+		beforeEach(() => {
+			sockets = [];
+			signalServer = new MockServer();
+			client = new IpcClient(
+				testConfig,
+				() => {
+					const socket = new MockSocket();
+					sockets.push(socket);
+					return socket as any;
+				},
+				(listener) => {
+					if (listener) {
+						signalServer.on("connection", listener);
+					}
+					return signalServer as any;
+				},
+			);
+		});
+
+		it("should not open a second socket when a ready signal arrives while connected", async () => {
+			const onConnected = vi.fn();
+			client.onConnected(onConnected);
+			await connectFirstSocket();
+			client.startSignalListener();
+
+			sendReadySignal();
+			await wait(10);
+
+			expect(sockets).toHaveLength(1);
+			expect(onConnected).not.toHaveBeenCalled();
+		});
+
+		it("should open one socket for two ready signals in a row while disconnected", async () => {
+			const onConnected = vi.fn();
+			client.onConnected(onConnected);
+			client.startSignalListener();
+
+			sendReadySignal();
+			sendReadySignal();
+			await wait(10);
+			expect(sockets).toHaveLength(1);
+
+			sockets[0]!.simulateConnect();
+			await wait(10);
+
+			expect(client.isConnected).toBe(true);
+			expect(onConnected).toHaveBeenCalledTimes(1);
+		});
+
+		it("should still connect when a ready signal arrives during a connect attempt that fails", async () => {
+			const onConnected = vi.fn();
+			client.onConnected(onConnected);
+			client.startSignalListener();
+
+			sendReadySignal();
+			await wait(5);
+			sendReadySignal();
+			await wait(5);
+			sockets[0]!.simulateError(new Error("ECONNREFUSED"));
+			await wait(10);
+			expect(sockets).toHaveLength(2);
+
+			sockets[1]!.simulateConnect();
+			await wait(10);
+
+			expect(client.isConnected).toBe(true);
+			expect(onConnected).toHaveBeenCalledTimes(1);
+		});
+
+		it("should share one connection attempt between parallel connect() calls", async () => {
+			const first = client.connect(100);
+			const second = client.connect(100);
+			expect(sockets).toHaveLength(1);
+
+			sockets[0]!.simulateConnect();
+
+			await expect(Promise.all([first, second])).resolves.toEqual([true, true]);
+		});
+
+		it("should keep the current socket when connect() is called while connected", async () => {
+			await connectFirstSocket();
+
+			await expect(client.connect(100)).resolves.toBe(true);
+
+			expect(sockets).toHaveLength(1);
+			expect(sockets[0]!.destroyed).toBe(false);
+		});
+
+		it("should keep a large chunked response intact when a ready signal arrives while connected", async () => {
+			// Regression: a second bridge's probe looked like a ready signal, the client opened a second
+			// socket, and the app's 8 KiB chunks from both sockets were mixed in one buffer
+			// ("Failed to parse message ... at position 8194").
+			await connectFirstSocket();
+			client.startSignalListener();
+			sendReadySignal();
+			await wait(10);
+			for (const socket of sockets.slice(1)) {
+				socket.simulateConnect();
+			}
+			await wait(10);
+
+			const blob = "QUJD".repeat(10 * 1024); // 40 KiB of base64
+			const toolsPromise = client.getTools();
+			toolsPromise.catch(() => {});
+			const requestSocket = sockets.find((socket) => socket.getWrittenData().length > 0)!;
+			const { id } = JSON.parse(requestSocket.getLastWritten()!) as { id: string };
+			const response = JSON.stringify({ id, result: { tools: [{ name: "t", description: blob, inputSchema: {} }] } });
+			const broadcast = JSON.stringify({ method: "notifications/resources/updated", params: { uri: "x://y", blob } });
+
+			// The app answers on the request socket and broadcasts to every connection, in alternating 8 KiB chunks.
+			const streams = sockets.map((socket) => ({
+				socket,
+				data: socket === requestSocket ? `${response}\n${broadcast}\n` : `${broadcast}\n`,
+			}));
+			const longest = Math.max(...streams.map((stream) => stream.data.length));
+			for (let offset = 0; offset < longest; offset += 8192) {
+				for (const { socket, data } of streams) {
+					if (offset < data.length) {
+						socket.simulateData(data.slice(offset, offset + 8192));
+					}
+				}
+			}
+
+			const parseErrors = consoleErrorSpy.mock.calls.filter((args: unknown[]) =>
+				args.includes("Failed to parse message:"),
+			);
+			expect(parseErrors).toHaveLength(0);
+			await expect(toolsPromise).resolves.toEqual([{ name: "t", description: blob, inputSchema: {} }]);
+		});
+
+		it("should not carry a partial UTF-8 character from a closed socket into the next one", async () => {
+			await connectFirstSocket();
+			sockets[0]!.emit("data", Buffer.from("日").subarray(0, 1));
+			sockets[0]!.simulateClose();
+			const reconnecting = client.connect(100);
+			sockets[1]!.simulateConnect();
+			await reconnecting;
+
+			const infoPromise = client.getServerInfo();
+			const { id } = JSON.parse(sockets[1]!.getLastWritten()!) as { id: string };
+			sockets[1]!.simulateData(JSON.stringify({ id, result: { name: "Deck", version: "1.0.0" } }) + "\n");
+
+			await expect(infoPromise).resolves.toEqual({ name: "Deck", version: "1.0.0" });
+		});
+
+		describe("events from a replaced socket", () => {
+			/**
+			 * Replaces the first socket with a second one. The first socket is destroyed, but its
+			 * "close" event has not fired yet (Node emits it asynchronously).
+			 */
+			async function replaceFirstSocket(): Promise<void> {
+				await connectFirstSocket();
+				sockets[0]!.destroyed = true;
+				const reconnecting = client.connect(100);
+				sockets[1]!.simulateConnect();
+				await reconnecting;
+			}
+
+			/**
+			 * Answers the last request written to the given socket.
+			 */
+			function respond(socket: MockSocket, result: unknown): void {
+				const { id } = JSON.parse(socket.getLastWritten()!) as { id: string };
+				socket.simulateData(JSON.stringify({ id, result }) + "\n");
+			}
+
+			it("should ignore late data from a replaced socket", async () => {
+				await replaceFirstSocket();
+				const infoPromise = client.getServerInfo();
+				infoPromise.catch(() => {});
+
+				sockets[0]!.emit("data", Buffer.from('{"id":"stale","result":{"na'));
+				respond(sockets[1]!, { name: "Current", version: "1.0.0" });
+
+				const parseErrors = consoleErrorSpy.mock.calls.filter((args: unknown[]) =>
+					args.includes("Failed to parse message:"),
+				);
+				expect(parseErrors).toHaveLength(0);
+				await expect(infoPromise).resolves.toEqual({ name: "Current", version: "1.0.0" });
+			});
+
+			it("should keep the current connection and its requests when a replaced socket closes late", async () => {
+				const onDisconnected = vi.fn();
+				client.onDisconnected(onDisconnected);
+				await replaceFirstSocket();
+				const infoPromise = client.getServerInfo();
+				infoPromise.catch(() => {});
+
+				sockets[0]!.emit("close");
+
+				expect(client.isConnected).toBe(true);
+				expect(onDisconnected).not.toHaveBeenCalled();
+				respond(sockets[1]!, { name: "Current", version: "1.0.0" });
+				await expect(infoPromise).resolves.toEqual({ name: "Current", version: "1.0.0" });
+			});
+
+			it("should close a replaced socket and fail the requests sent on it", async () => {
+				await connectFirstSocket();
+				const stalePromise = client.getServerInfo();
+				stalePromise.catch(() => {});
+				const destroySpy = vi.spyOn(sockets[0]!, "destroy");
+				sockets[0]!.destroyed = true;
+
+				const reconnecting = client.connect(100);
+				sockets[1]!.simulateConnect();
+				await reconnecting;
+
+				expect(destroySpy).toHaveBeenCalled();
+				await expect(Promise.race([stalePromise, wait(50).then(() => "pending")])).rejects.toThrow("Connection closed");
+			});
+		});
+
+		it("should not report a disconnection when disconnect() closes the socket", async () => {
+			const onDisconnected = vi.fn();
+			client.onDisconnected(onDisconnected);
+			await connectFirstSocket();
+
+			client.disconnect();
+
+			expect(sockets[0]!.destroyed).toBe(true);
+			expect(onDisconnected).not.toHaveBeenCalled();
+		});
+
+		it("should fail in-flight requests on disconnect() even before the socket emits close", async () => {
+			await connectFirstSocket();
+			const infoPromise = client.getServerInfo();
+			infoPromise.catch(() => {});
+			// Node emits "close" asynchronously after destroy().
+			vi.spyOn(sockets[0]!, "destroy").mockImplementation(() => {
+				sockets[0]!.destroyed = true;
+				return sockets[0]!;
+			});
+
+			client.disconnect();
+
+			await expect(Promise.race([infoPromise, wait(50).then(() => "pending")])).rejects.toThrow("Connection closed");
 		});
 	});
 

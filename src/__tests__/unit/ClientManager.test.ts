@@ -7,10 +7,19 @@ import type {
 	CallToolResponse,
 	ClientManagerConfig,
 	IpcClientConfig,
+	McpTool,
+	NotificationCallback,
 	ResourcesReadOutcome,
 	ServerInfo,
 } from "../../types.js";
-import { createMockClient, createMockResource, createMockServerInfo, createMockTool, wait } from "../helpers/testUtils.js";
+import {
+	createDeferred,
+	createMockClient,
+	createMockResource,
+	createMockServerInfo,
+	createMockTool,
+	wait,
+} from "../helpers/testUtils.js";
 
 /**
  * Creates a ClientManager wired to two deterministic mock clients for testing.
@@ -374,7 +383,11 @@ describe("ClientManager", () => {
 			app1?: ServerInfo | Error | null;
 			app2?: ServerInfo | Error | null;
 		}): Promise<ClientManager> => {
-			const { manager: m, mockClient1, mockClient2 } = createTestManager({
+			const {
+				manager: m,
+				mockClient1,
+				mockClient2,
+			} = createTestManager({
 				app1Connected: infos.app1 !== undefined,
 				app2Connected: infos.app2 !== undefined,
 			});
@@ -533,7 +546,12 @@ describe("ClientManager", () => {
 			const result = await manager.callTool("app1__toggle_light", { brightness: 100 }, "req-123");
 
 			// Verify correct client was called with stripped prefix
-			expect(callToolMockClient1.callTool).toHaveBeenCalledWith("toggle_light", { brightness: 100 }, "req-123", undefined);
+			expect(callToolMockClient1.callTool).toHaveBeenCalledWith(
+				"toggle_light",
+				{ brightness: 100 },
+				"req-123",
+				undefined,
+			);
 			expect(result).toBe(expectedResponse);
 
 			// Verify the other client was NOT called (multi-client routing discrimination)
@@ -567,12 +585,7 @@ describe("ClientManager", () => {
 
 			await manager.callTool("app1__toggle_light", { brightness: 100 }, "req-123", meta);
 
-			expect(callToolMockClient1.callTool).toHaveBeenCalledWith(
-				"toggle_light",
-				{ brightness: 100 },
-				"req-123",
-				meta,
-			);
+			expect(callToolMockClient1.callTool).toHaveBeenCalledWith("toggle_light", { brightness: 100 }, "req-123", meta);
 			// The metadata object is passed through by reference, not copied or rewritten.
 			expect(callToolMockClient1.callTool.mock.calls[0]?.[3]).toBe(meta);
 		});
@@ -1081,6 +1094,74 @@ describe("ClientManager", () => {
 
 			expect(clientDisconnectedCb).toHaveBeenCalledWith("myapp");
 			mgr.close();
+		});
+	});
+
+	// -------------------------------------------------------------------------
+	// Refresh serialization
+	// -------------------------------------------------------------------------
+
+	describe("refresh serialization", () => {
+		it("should run at most one extra refresh for a burst of list_changed notifications", async () => {
+			const mockClient = createMockClient({ isConnected: true });
+			let notify: NotificationCallback = () => {};
+			mockClient.onNotification.mockImplementation((cb: NotificationCallback) => {
+				notify = cb;
+			});
+			mockClient.connect.mockResolvedValue(true);
+			mockClient.getTools.mockResolvedValue([]);
+			mockClient.getResources.mockResolvedValue([]);
+			mockClient.getServerInfo.mockResolvedValue(null);
+			manager = new ClientManager({ apps: [{ name: "app", socketBaseName: "app" }] }, () => mockClient as any);
+			await manager.initialize();
+			mockClient.getTools.mockClear();
+
+			const firstRound = createDeferred<McpTool[]>();
+			mockClient.getTools
+				.mockReturnValueOnce(firstRound.promise)
+				.mockResolvedValue([createMockTool({ name: "latest" })]);
+
+			notify(SDK_NOTIFICATIONS.TOOLS_LIST_CHANGED, undefined);
+			notify(SDK_NOTIFICATIONS.TOOLS_LIST_CHANGED, undefined);
+			notify(SDK_NOTIFICATIONS.RESOURCES_LIST_CHANGED, undefined);
+			await wait(10);
+			expect(mockClient.getTools).toHaveBeenCalledTimes(1);
+
+			firstRound.resolve([createMockTool({ name: "stale" })]);
+			await wait(10);
+
+			expect(mockClient.getTools).toHaveBeenCalledTimes(2);
+			expect(manager.getTools().map((tool) => tool.name)).toEqual(["app__latest"]);
+		});
+
+		it("should notify every list_changed caller after the refresh that follows it", async () => {
+			const mockClient = createMockClient({ isConnected: true });
+			let notify: NotificationCallback = () => {};
+			mockClient.onNotification.mockImplementation((cb: NotificationCallback) => {
+				notify = cb;
+			});
+			mockClient.connect.mockResolvedValue(true);
+			mockClient.getTools.mockResolvedValue([]);
+			mockClient.getResources.mockResolvedValue([]);
+			mockClient.getServerInfo.mockResolvedValue(null);
+			manager = new ClientManager({ apps: [{ name: "app", socketBaseName: "app" }] }, () => mockClient as any);
+			await manager.initialize();
+
+			const firstRound = createDeferred<McpTool[]>();
+			mockClient.getTools
+				.mockReturnValueOnce(firstRound.promise)
+				.mockResolvedValue([createMockTool({ name: "latest" })]);
+			const seenOnNotify: string[][] = [];
+			manager.onToolsChanged(async () => {
+				seenOnNotify.push(manager.getTools().map((tool) => tool.name));
+			});
+
+			notify(SDK_NOTIFICATIONS.TOOLS_LIST_CHANGED, undefined);
+			notify(SDK_NOTIFICATIONS.TOOLS_LIST_CHANGED, undefined);
+			firstRound.resolve([createMockTool({ name: "stale" })]);
+			await wait(10);
+
+			expect(seenOnNotify).toEqual([["app__stale"], ["app__latest"]]);
 		});
 	});
 });

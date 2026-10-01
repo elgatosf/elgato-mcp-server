@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as net from "node:net";
+import { StringDecoder } from "node:string_decoder";
 
 import {
 	ELICITATION_TIMEOUT_MS,
@@ -8,6 +9,8 @@ import {
 	QUICK_CONNECT_TIMEOUT_MS,
 	RECONNECT_POLL_INTERVAL_MS,
 	REQUEST_TIMEOUT_MS,
+	SIGNAL_PROBE_MARKER,
+	SIGNAL_SETTLE_TIMEOUT_MS,
 } from "./constants.js";
 import type {
 	CallToolRequest,
@@ -52,6 +55,7 @@ export type ServerFactory = (connectionListener?: (socket: net.Socket) => void) 
 export class IpcClient {
 	private buffer = "";
 	private readonly config: IpcClientConfig;
+	private connecting: Promise<boolean> | null = null;
 	private elicitationCallback: ElicitationCallback | null = null;
 	private notificationCallbacks: NotificationCallback[] = [];
 	private onConnectedCallback: (() => void) | null = null;
@@ -112,40 +116,37 @@ export class IpcClient {
 
 	/**
 	 * Attempts to connect to the app via IPC socket.
+	 * Keeps the current socket when already connected, and shares one attempt between parallel calls,
+	 * so the client never holds more than one socket to the app.
 	 * @param timeoutMs - Connection timeout in milliseconds.
 	 * @returns Whether connection was successful.
 	 */
 	public async connect(timeoutMs = QUICK_CONNECT_TIMEOUT_MS): Promise<boolean> {
-		return new Promise((resolve) => {
-			const socket = this.socketFactory(this.config.socketPath);
+		if (this.isConnected) {
+			return true;
+		}
 
-			const timeoutId = setTimeout(() => {
-				socket.destroy();
-				resolve(false);
-			}, timeoutMs);
-
-			socket.on("connect", () => {
-				clearTimeout(timeoutId);
-				this.socket = socket;
-				this.setupSocketHandlers();
-				resolve(true);
-			});
-
-			socket.on("error", () => {
-				clearTimeout(timeoutId);
-				resolve(false);
-			});
+		this.connecting ??= this.openSocket(timeoutMs).finally(() => {
+			this.connecting = null;
 		});
+		return this.connecting;
 	}
 
 	/**
 	 * Disconnects from the app and stops the signal listener.
 	 */
 	public disconnect(): void {
-		this.socket?.destroy();
+		// Clear the field before destroy(): the socket's "close" event is then ignored on every
+		// platform, so fail in-flight requests here.
+		const socket = this.socket;
 		this.socket = null;
-		this.signalServer?.close();
+		socket?.destroy();
+		this.rejectPendingRequests();
+		// Clear the field before close(): signal connections that are still open settle later
+		// (on close or on their timeout), and they must not reconnect.
+		const signalServer = this.signalServer;
 		this.signalServer = null;
+		signalServer?.close();
 
 		if (this.pollInterval) {
 			clearInterval(this.pollInterval);
@@ -269,6 +270,22 @@ export class IpcClient {
 	}
 
 	/**
+	 * Makes the given socket the current one. A previous socket is closed, and requests written to it fail.
+	 * @param socket - The newly connected socket.
+	 */
+	private attachSocket(socket: net.Socket): void {
+		const previous = this.socket;
+		this.socket = socket;
+		this.buffer = "";
+		this.setupSocketHandlers(socket);
+
+		if (previous && previous !== socket) {
+			this.rejectPendingRequests();
+			previous.destroy();
+		}
+	}
+
+	/**
 	 * Creates a timeout that rejects a pending request after the specified duration.
 	 * @param requestId - The ID of the request to timeout.
 	 * @param reject - The reject function from the request's promise.
@@ -298,15 +315,19 @@ export class IpcClient {
 		return true;
 	}
 
-	private handleClose(): void {
+	/**
+	 * Handles the close of a socket. Only the current socket resets the connection state;
+	 * a replaced socket that closes late must not tear down the live one.
+	 * @param socket - The socket that closed.
+	 */
+	private handleClose(socket: net.Socket): void {
+		if (socket !== this.socket) {
+			return;
+		}
+
 		this.socket = null;
 		this.buffer = "";
-
-		for (const [id, pending] of this.pendingRequests) {
-			clearTimeout(pending.timeout);
-			pending.reject(new Error("Connection closed"));
-			this.pendingRequests.delete(id);
-		}
+		this.rejectPendingRequests();
 
 		// Notify that we've disconnected
 		if (this.onDisconnectedCallback) {
@@ -320,8 +341,8 @@ export class IpcClient {
 		}
 	}
 
-	private handleData(data: Buffer | string): void {
-		this.buffer += typeof data === "string" ? data : data.toString();
+	private handleData(chunk: string): void {
+		this.buffer += chunk;
 
 		if (this.buffer.length > MAX_BUFFER_SIZE) {
 			log.error("Buffer overflow, clearing buffer");
@@ -411,6 +432,21 @@ export class IpcClient {
 	}
 
 	private async handleReadySignal(): Promise<void> {
+		// A signal while connected must not open a second socket or report a new connection.
+		if (this.isConnected) {
+			return;
+		}
+
+		// A signal during a connect attempt waits for it, and retries only if it failed. The caller that
+		// started the successful attempt reports the connection, so onConnected fires once.
+		const attempt = this.connecting;
+		if (attempt) {
+			await attempt;
+			if (this.isConnected || this.connecting !== null) {
+				return;
+			}
+		}
+
 		const connected = await this.connect();
 		if (connected && this.onConnectedCallback) {
 			this.onConnectedCallback();
@@ -430,6 +466,47 @@ export class IpcClient {
 			this.pendingRequests.delete(response.id);
 			pending.resolve(response);
 		}
+	}
+
+	/**
+	 * Decides whether a connection to the signal socket is the app's ready signal.
+	 * Another bridge's liveness probe (see {@link IpcClient.isSocketActive}) sends
+	 * {@link SIGNAL_PROBE_MARKER} first and is ignored. The socket is a byte stream, so the marker
+	 * may arrive in several chunks. Anything else counts as a ready signal: other data, a close,
+	 * an error, or no full marker within {@link SIGNAL_SETTLE_TIMEOUT_MS}.
+	 * @param connection - The incoming connection on the signal socket.
+	 */
+	private handleSignalConnection(connection: net.Socket): void {
+		let settled = false;
+		const settle = (isProbe: boolean): void => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timeout);
+			connection.end();
+
+			if (isProbe) {
+				log.debug(`Ignored a liveness probe on ${this.config.signalSocketPath}`);
+			} else if (this.signalServer) {
+				log.info(`Received ready signal from ${this.config.name}`);
+				void this.handleReadySignal();
+			}
+		};
+
+		const timeout = setTimeout(() => settle(false), SIGNAL_SETTLE_TIMEOUT_MS);
+		let received = "";
+		connection.on("data", (data: Buffer) => {
+			if (settled) return;
+			received += data.toString();
+			if (received.startsWith(SIGNAL_PROBE_MARKER)) {
+				settle(true);
+			} else if (!SIGNAL_PROBE_MARKER.startsWith(received)) {
+				settle(false);
+			}
+			// Otherwise the bytes so far are a prefix of the marker: wait for more.
+		});
+		connection.once("end", () => settle(false));
+		connection.once("close", () => settle(false));
+		connection.on("error", () => settle(false));
 	}
 
 	/**
@@ -525,7 +602,8 @@ export class IpcClient {
 
 			testSocket.on("connect", () => {
 				clearTimeout(timeout);
-				testSocket.end(); // Graceful close - we confirmed it's active
+				// Graceful close - we confirmed it's active. The marker tells the owner this is not a ready signal.
+				testSocket.end(SIGNAL_PROBE_MARKER);
 				resolve(true);
 			});
 
@@ -533,6 +611,33 @@ export class IpcClient {
 				clearTimeout(timeout);
 				testSocket.destroy(); // Already errored, just clean up
 				resolve(false); // Socket file exists but no listener (stale)
+			});
+		});
+	}
+
+	/**
+	 * Opens one socket to the app and makes it the current socket once it connects.
+	 * @param timeoutMs - Connection timeout in milliseconds.
+	 * @returns Whether connection was successful.
+	 */
+	private openSocket(timeoutMs: number): Promise<boolean> {
+		return new Promise((resolve) => {
+			const socket = this.socketFactory(this.config.socketPath);
+
+			const timeoutId = setTimeout(() => {
+				socket.destroy();
+				resolve(false);
+			}, timeoutMs);
+
+			socket.on("connect", () => {
+				clearTimeout(timeoutId);
+				this.attachSocket(socket);
+				resolve(true);
+			});
+
+			socket.on("error", () => {
+				clearTimeout(timeoutId);
+				resolve(false);
 			});
 		});
 	}
@@ -561,6 +666,17 @@ export class IpcClient {
 			}
 		} catch (error) {
 			log.error("Failed to parse message:", error);
+		}
+	}
+
+	/**
+	 * Fails all pending requests. Their responses can no longer arrive on the current socket.
+	 */
+	private rejectPendingRequests(): void {
+		for (const [id, pending] of this.pendingRequests) {
+			clearTimeout(pending.timeout);
+			pending.reject(new Error("Connection closed"));
+			this.pendingRequests.delete(id);
 		}
 	}
 
@@ -618,12 +734,21 @@ export class IpcClient {
 		});
 	}
 
-	private setupSocketHandlers(): void {
-		if (!this.socket) return;
-
-		this.socket.on("data", (data) => this.handleData(data));
-		this.socket.on("close", () => this.handleClose());
-		this.socket.on("error", (error) => this.handleError(error));
+	/**
+	 * Binds the data, close and error handlers to one socket. Events from a socket that is
+	 * no longer the current one are ignored, so a stale stream can never reach the shared buffer.
+	 * @param socket - The socket to bind the handlers to.
+	 */
+	private setupSocketHandlers(socket: net.Socket): void {
+		// One decoder per socket, so a multi-byte UTF-8 character split across chunks is decoded whole.
+		const decoder = new StringDecoder("utf8");
+		socket.on("data", (data: Buffer | string) => {
+			if (socket === this.socket) this.handleData(typeof data === "string" ? data : decoder.write(data));
+		});
+		socket.on("close", () => this.handleClose(socket));
+		socket.on("error", (error) => {
+			if (socket === this.socket) this.handleError(error);
+		});
 	}
 
 	/**
@@ -647,11 +772,7 @@ export class IpcClient {
 	private tryStartSignalServer(): void {
 		if (this.signalServer) return;
 
-		this.signalServer = this.serverFactory((connection) => {
-			log.info(`Received ready signal from ${this.config.name}`);
-			connection.end();
-			void this.handleReadySignal();
-		});
+		this.signalServer = this.serverFactory((connection) => this.handleSignalConnection(connection));
 
 		this.signalServer.on("error", (error: NodeJS.ErrnoException) => {
 			if (!this.signalServer) return;
