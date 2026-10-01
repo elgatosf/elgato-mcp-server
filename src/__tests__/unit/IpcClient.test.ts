@@ -1,6 +1,11 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { RECONNECT_POLL_INTERVAL_MS, REQUEST_TIMEOUT_MS } from "../../constants.js";
+import {
+	RECONNECT_POLL_INTERVAL_MS,
+	REQUEST_TIMEOUT_MS,
+	SIGNAL_PROBE_MARKER,
+	SIGNAL_SETTLE_TIMEOUT_MS,
+} from "../../constants.js";
 import { IpcClient } from "../../IpcClient.js";
 import type { ElicitationCallback, IpcClientConfig } from "../../types.js";
 import { setVerbose } from "../../utils.js";
@@ -605,9 +610,10 @@ describe("IpcClient", () => {
 			// Verify server is listening
 			expect(mockServer.isListening()).toBe(true);
 
-			// Simulate signal connection
+			// Simulate the app's signal: it connects to the signal socket and closes it
 			const signalSocket = new MockSocket();
 			mockServer.simulateConnection(signalSocket as any);
+			signalSocket.emit("end");
 
 			// Wait a bit for async operations
 			await wait(50);
@@ -625,6 +631,47 @@ describe("IpcClient", () => {
 
 			// Verify the callback was called
 			expect(callbackCalled).toBe(true);
+		});
+		it("should treat a signal connection that stays open without data as a ready signal", async () => {
+			vi.useFakeTimers();
+			try {
+				const connectSpy = vi.spyOn(client, "connect");
+				client.startSignalListener();
+
+				const signalSocket = new MockSocket();
+				mockServer.simulateConnection(signalSocket as any);
+				await vi.advanceTimersByTimeAsync(SIGNAL_SETTLE_TIMEOUT_MS);
+
+				expect(connectSpy).toHaveBeenCalledTimes(1);
+				expect(signalSocket.ended).toBe(true);
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("should ignore a signal connection that starts with the probe marker", async () => {
+			const connectSpy = vi.spyOn(client, "connect");
+			client.startSignalListener();
+
+			const probe = new MockSocket();
+			mockServer.simulateConnection(probe as any);
+			probe.simulateData(`${SIGNAL_PROBE_MARKER}\n`);
+			probe.emit("end");
+			await wait(10);
+
+			expect(connectSpy).not.toHaveBeenCalled();
+			expect(probe.ended).toBe(true);
+		});
+
+		it("should not connect when disconnect() closes a signal connection that is still open", async () => {
+			const connectSpy = vi.spyOn(client, "connect");
+			client.startSignalListener();
+			mockServer.simulateConnection(new MockSocket() as any);
+
+			client.disconnect();
+			await wait(SIGNAL_SETTLE_TIMEOUT_MS + 50);
+
+			expect(connectSpy).not.toHaveBeenCalled();
 		});
 	});
 

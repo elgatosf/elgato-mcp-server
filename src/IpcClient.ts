@@ -8,6 +8,8 @@ import {
 	QUICK_CONNECT_TIMEOUT_MS,
 	RECONNECT_POLL_INTERVAL_MS,
 	REQUEST_TIMEOUT_MS,
+	SIGNAL_PROBE_MARKER,
+	SIGNAL_SETTLE_TIMEOUT_MS,
 } from "./constants.js";
 import type {
 	CallToolRequest,
@@ -137,8 +139,10 @@ export class IpcClient {
 		this.socket = null;
 		// The socket's "close" event fires later and is ignored, so fail in-flight requests now.
 		this.rejectPendingRequests();
-		this.signalServer?.close();
+		// Clear the field first: closing the server ends open signal connections, and those must not reconnect.
+		const signalServer = this.signalServer;
 		this.signalServer = null;
+		signalServer?.close();
 
 		if (this.pollInterval) {
 			clearInterval(this.pollInterval);
@@ -451,6 +455,36 @@ export class IpcClient {
 	}
 
 	/**
+	 * Decides whether a connection to the signal socket is the app's ready signal.
+	 * Another bridge's liveness probe (see {@link IpcClient.isSocketActive}) starts with
+	 * {@link SIGNAL_PROBE_MARKER} and is ignored. Anything else counts as a ready signal:
+	 * other data, a close, or no data within {@link SIGNAL_SETTLE_TIMEOUT_MS}.
+	 * @param connection - The incoming connection on the signal socket.
+	 */
+	private handleSignalConnection(connection: net.Socket): void {
+		let settled = false;
+		const settle = (isProbe: boolean): void => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timeout);
+			connection.end();
+
+			if (isProbe) {
+				log.debug(`Ignored a liveness probe on ${this.config.signalSocketPath}`);
+			} else if (this.signalServer) {
+				log.info(`Received ready signal from ${this.config.name}`);
+				void this.handleReadySignal();
+			}
+		};
+
+		const timeout = setTimeout(() => settle(false), SIGNAL_SETTLE_TIMEOUT_MS);
+		connection.once("data", (data: Buffer) => settle(data.toString().startsWith(SIGNAL_PROBE_MARKER)));
+		connection.once("end", () => settle(false));
+		connection.once("close", () => settle(false));
+		connection.on("error", () => settle(false));
+	}
+
+	/**
 	 * Handles EADDRINUSE error by checking if the socket is stale.
 	 * If stale, removes the socket file and retries binding.
 	 * If active, another process owns it — we don't retry.
@@ -543,7 +577,8 @@ export class IpcClient {
 
 			testSocket.on("connect", () => {
 				clearTimeout(timeout);
-				testSocket.end(); // Graceful close - we confirmed it's active
+				// Graceful close - we confirmed it's active. The marker tells the owner this is not a ready signal.
+				testSocket.end(`${SIGNAL_PROBE_MARKER}\n`);
 				resolve(true);
 			});
 
@@ -710,11 +745,7 @@ export class IpcClient {
 	private tryStartSignalServer(): void {
 		if (this.signalServer) return;
 
-		this.signalServer = this.serverFactory((connection) => {
-			log.info(`Received ready signal from ${this.config.name}`);
-			connection.end();
-			void this.handleReadySignal();
-		});
+		this.signalServer = this.serverFactory((connection) => this.handleSignalConnection(connection));
 
 		this.signalServer.on("error", (error: NodeJS.ErrnoException) => {
 			if (!this.signalServer) return;
