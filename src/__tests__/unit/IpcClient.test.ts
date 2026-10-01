@@ -761,6 +761,26 @@ describe("IpcClient", () => {
 			expect(onConnected).toHaveBeenCalledTimes(1);
 		});
 
+		it("should still connect when a ready signal arrives during a connect attempt that fails", async () => {
+			const onConnected = vi.fn();
+			client.onConnected(onConnected);
+			client.startSignalListener();
+
+			sendReadySignal();
+			await wait(5);
+			sendReadySignal();
+			await wait(5);
+			sockets[0]!.simulateError(new Error("ECONNREFUSED"));
+			await wait(10);
+			expect(sockets).toHaveLength(2);
+
+			sockets[1]!.simulateConnect();
+			await wait(10);
+
+			expect(client.isConnected).toBe(true);
+			expect(onConnected).toHaveBeenCalledTimes(1);
+		});
+
 		it("should share one connection attempt between parallel connect() calls", async () => {
 			const first = client.connect(100);
 			const second = client.connect(100);

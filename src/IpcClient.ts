@@ -429,9 +429,19 @@ export class IpcClient {
 	}
 
 	private async handleReadySignal(): Promise<void> {
-		// A signal while connected (or connecting) must not open a second socket or report a new connection.
-		if (this.isConnected || this.connecting) {
+		// A signal while connected must not open a second socket or report a new connection.
+		if (this.isConnected) {
 			return;
+		}
+
+		// A signal during a connect attempt waits for it, and retries only if it failed. The caller that
+		// started the successful attempt reports the connection, so onConnected fires once.
+		const attempt = this.connecting;
+		if (attempt) {
+			await attempt;
+			if (this.isConnected || this.connecting !== null) {
+				return;
+			}
 		}
 
 		const connected = await this.connect();
