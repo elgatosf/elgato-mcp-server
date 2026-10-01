@@ -52,6 +52,7 @@ export type ServerFactory = (connectionListener?: (socket: net.Socket) => void) 
 export class IpcClient {
 	private buffer = "";
 	private readonly config: IpcClientConfig;
+	private connecting: Promise<boolean> | null = null;
 	private elicitationCallback: ElicitationCallback | null = null;
 	private notificationCallbacks: NotificationCallback[] = [];
 	private onConnectedCallback: (() => void) | null = null;
@@ -112,30 +113,20 @@ export class IpcClient {
 
 	/**
 	 * Attempts to connect to the app via IPC socket.
+	 * Keeps the current socket when already connected, and shares one attempt between parallel calls,
+	 * so the client never holds more than one socket to the app.
 	 * @param timeoutMs - Connection timeout in milliseconds.
 	 * @returns Whether connection was successful.
 	 */
 	public async connect(timeoutMs = QUICK_CONNECT_TIMEOUT_MS): Promise<boolean> {
-		return new Promise((resolve) => {
-			const socket = this.socketFactory(this.config.socketPath);
+		if (this.isConnected) {
+			return true;
+		}
 
-			const timeoutId = setTimeout(() => {
-				socket.destroy();
-				resolve(false);
-			}, timeoutMs);
-
-			socket.on("connect", () => {
-				clearTimeout(timeoutId);
-				this.socket = socket;
-				this.setupSocketHandlers();
-				resolve(true);
-			});
-
-			socket.on("error", () => {
-				clearTimeout(timeoutId);
-				resolve(false);
-			});
+		this.connecting ??= this.openSocket(timeoutMs).finally(() => {
+			this.connecting = null;
 		});
+		return this.connecting;
 	}
 
 	/**
@@ -411,6 +402,11 @@ export class IpcClient {
 	}
 
 	private async handleReadySignal(): Promise<void> {
+		// A signal while connected (or connecting) must not open a second socket or report a new connection.
+		if (this.isConnected || this.connecting) {
+			return;
+		}
+
 		const connected = await this.connect();
 		if (connected && this.onConnectedCallback) {
 			this.onConnectedCallback();
@@ -533,6 +529,34 @@ export class IpcClient {
 				clearTimeout(timeout);
 				testSocket.destroy(); // Already errored, just clean up
 				resolve(false); // Socket file exists but no listener (stale)
+			});
+		});
+	}
+
+	/**
+	 * Opens one socket to the app and makes it the current socket once it connects.
+	 * @param timeoutMs - Connection timeout in milliseconds.
+	 * @returns Whether connection was successful.
+	 */
+	private openSocket(timeoutMs: number): Promise<boolean> {
+		return new Promise((resolve) => {
+			const socket = this.socketFactory(this.config.socketPath);
+
+			const timeoutId = setTimeout(() => {
+				socket.destroy();
+				resolve(false);
+			}, timeoutMs);
+
+			socket.on("connect", () => {
+				clearTimeout(timeoutId);
+				this.socket = socket;
+				this.setupSocketHandlers();
+				resolve(true);
+			});
+
+			socket.on("error", () => {
+				clearTimeout(timeoutId);
+				resolve(false);
 			});
 		});
 	}

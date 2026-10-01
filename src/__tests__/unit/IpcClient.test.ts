@@ -628,6 +628,139 @@ describe("IpcClient", () => {
 		});
 	});
 
+	describe("single live socket", () => {
+		let sockets: MockSocket[];
+		let signalServer: MockServer;
+
+		/**
+		 * Simulates the app's ready signal: it connects to the signal socket and closes it.
+		 */
+		function sendReadySignal(): void {
+			const signal = new MockSocket();
+			signalServer.simulateConnection(signal as any);
+			signal.emit("end");
+		}
+
+		/**
+		 * Connects the client through the first socket the factory returns.
+		 */
+		async function connectFirstSocket(): Promise<void> {
+			const connecting = client.connect(100);
+			sockets[0]!.simulateConnect();
+			await connecting;
+		}
+
+		beforeEach(() => {
+			sockets = [];
+			signalServer = new MockServer();
+			client = new IpcClient(
+				testConfig,
+				() => {
+					const socket = new MockSocket();
+					sockets.push(socket);
+					return socket as any;
+				},
+				(listener) => {
+					if (listener) {
+						signalServer.on("connection", listener);
+					}
+					return signalServer as any;
+				},
+			);
+		});
+
+		it("should not open a second socket when a ready signal arrives while connected", async () => {
+			const onConnected = vi.fn();
+			client.onConnected(onConnected);
+			await connectFirstSocket();
+			client.startSignalListener();
+
+			sendReadySignal();
+			await wait(10);
+
+			expect(sockets).toHaveLength(1);
+			expect(onConnected).not.toHaveBeenCalled();
+		});
+
+		it("should open one socket for two ready signals in a row while disconnected", async () => {
+			const onConnected = vi.fn();
+			client.onConnected(onConnected);
+			client.startSignalListener();
+
+			sendReadySignal();
+			sendReadySignal();
+			await wait(10);
+			expect(sockets).toHaveLength(1);
+
+			sockets[0]!.simulateConnect();
+			await wait(10);
+
+			expect(client.isConnected).toBe(true);
+			expect(onConnected).toHaveBeenCalledTimes(1);
+		});
+
+		it("should share one connection attempt between parallel connect() calls", async () => {
+			const first = client.connect(100);
+			const second = client.connect(100);
+			expect(sockets).toHaveLength(1);
+
+			sockets[0]!.simulateConnect();
+
+			await expect(Promise.all([first, second])).resolves.toEqual([true, true]);
+		});
+
+		it("should keep the current socket when connect() is called while connected", async () => {
+			await connectFirstSocket();
+
+			await expect(client.connect(100)).resolves.toBe(true);
+
+			expect(sockets).toHaveLength(1);
+			expect(sockets[0]!.destroyed).toBe(false);
+		});
+
+		it("should keep a large chunked response intact when a ready signal arrives while connected", async () => {
+			// Regression: a second bridge's probe looked like a ready signal, the client opened a second
+			// socket, and the app's 8 KiB chunks from both sockets were mixed in one buffer
+			// ("Failed to parse message ... at position 8194").
+			await connectFirstSocket();
+			client.startSignalListener();
+			sendReadySignal();
+			await wait(10);
+			for (const socket of sockets.slice(1)) {
+				socket.simulateConnect();
+			}
+			await wait(10);
+
+			const blob = "QUJD".repeat(10 * 1024); // 40 KiB of base64
+			const toolsPromise = client.getTools();
+			toolsPromise.catch(() => {});
+			const requestSocket = sockets.find((socket) => socket.getWrittenData().length > 0)!;
+			const { id } = JSON.parse(requestSocket.getLastWritten()!) as { id: string };
+			const response = JSON.stringify({ id, result: { tools: [{ name: "t", description: blob, inputSchema: {} }] } });
+			const broadcast = JSON.stringify({ method: "notifications/resources/updated", params: { uri: "x://y", blob } });
+
+			// The app answers on the request socket and broadcasts to every connection, in alternating 8 KiB chunks.
+			const streams = sockets.map((socket) => ({
+				socket,
+				data: socket === requestSocket ? `${response}\n${broadcast}\n` : `${broadcast}\n`,
+			}));
+			const longest = Math.max(...streams.map((stream) => stream.data.length));
+			for (let offset = 0; offset < longest; offset += 8192) {
+				for (const { socket, data } of streams) {
+					if (offset < data.length) {
+						socket.simulateData(data.slice(offset, offset + 8192));
+					}
+				}
+			}
+
+			const parseErrors = consoleErrorSpy.mock.calls.filter((args: unknown[]) =>
+				args.includes("Failed to parse message:"),
+			);
+			expect(parseErrors).toHaveLength(0);
+			await expect(toolsPromise).resolves.toEqual([{ name: "t", description: blob, inputSchema: {} }]);
+		});
+	});
+
 	describe("onConnected callback", () => {
 		it("should register and call onConnected callback", () => {
 			let called = false;
