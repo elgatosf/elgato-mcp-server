@@ -678,6 +678,21 @@ describe("IpcClient", () => {
 			expect(probe.ended).toBe(true);
 		});
 
+		it.each([
+			{ name: "sends data other than the probe marker", emit: (s: MockSocket) => s.simulateData("ready\n") },
+			{ name: "fails with an error", emit: (s: MockSocket) => s.simulateError(new Error("ECONNRESET")) },
+		])("should treat a signal connection that $name as a ready signal", async ({ emit }) => {
+			const connectSpy = vi.spyOn(client, "connect");
+			client.startSignalListener();
+
+			const signalSocket = new MockSocket();
+			mockServer.simulateConnection(signalSocket as any);
+			emit(signalSocket);
+			await wait(10);
+
+			expect(connectSpy).toHaveBeenCalledTimes(1);
+		});
+
 		it("should not connect when disconnect() closes a signal connection that is still open", async () => {
 			const connectSpy = vi.spyOn(client, "connect");
 			client.startSignalListener();
