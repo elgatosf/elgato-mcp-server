@@ -136,11 +136,14 @@ export class IpcClient {
 	 * Disconnects from the app and stops the signal listener.
 	 */
 	public disconnect(): void {
-		this.socket?.destroy();
+		// Clear the field before destroy(): the socket's "close" event is then ignored on every
+		// platform, so fail in-flight requests here.
+		const socket = this.socket;
 		this.socket = null;
-		// The socket's "close" event fires later and is ignored, so fail in-flight requests now.
+		socket?.destroy();
 		this.rejectPendingRequests();
-		// Clear the field first: closing the server ends open signal connections, and those must not reconnect.
+		// Clear the field before close(): signal connections that are still open settle later
+		// (on close or on their timeout), and they must not reconnect.
 		const signalServer = this.signalServer;
 		this.signalServer = null;
 		signalServer?.close();

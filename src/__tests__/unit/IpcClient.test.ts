@@ -924,6 +924,17 @@ describe("IpcClient", () => {
 			});
 		});
 
+		it("should not report a disconnection when disconnect() closes the socket", async () => {
+			const onDisconnected = vi.fn();
+			client.onDisconnected(onDisconnected);
+			await connectFirstSocket();
+
+			client.disconnect();
+
+			expect(sockets[0]!.destroyed).toBe(true);
+			expect(onDisconnected).not.toHaveBeenCalled();
+		});
+
 		it("should fail in-flight requests on disconnect() even before the socket emits close", async () => {
 			await connectFirstSocket();
 			const infoPromise = client.getServerInfo();
