@@ -470,9 +470,10 @@ export class IpcClient {
 
 	/**
 	 * Decides whether a connection to the signal socket is the app's ready signal.
-	 * Another bridge's liveness probe (see {@link IpcClient.isSocketActive}) starts with
-	 * {@link SIGNAL_PROBE_MARKER} and is ignored. Anything else counts as a ready signal:
-	 * other data, a close, or no data within {@link SIGNAL_SETTLE_TIMEOUT_MS}.
+	 * Another bridge's liveness probe (see {@link IpcClient.isSocketActive}) sends
+	 * {@link SIGNAL_PROBE_MARKER} first and is ignored. The socket is a byte stream, so the marker
+	 * may arrive in several chunks. Anything else counts as a ready signal: other data, a close,
+	 * an error, or no full marker within {@link SIGNAL_SETTLE_TIMEOUT_MS}.
 	 * @param connection - The incoming connection on the signal socket.
 	 */
 	private handleSignalConnection(connection: net.Socket): void {
@@ -492,7 +493,17 @@ export class IpcClient {
 		};
 
 		const timeout = setTimeout(() => settle(false), SIGNAL_SETTLE_TIMEOUT_MS);
-		connection.once("data", (data: Buffer) => settle(data.toString().startsWith(SIGNAL_PROBE_MARKER)));
+		let received = "";
+		connection.on("data", (data: Buffer) => {
+			if (settled) return;
+			received += data.toString();
+			if (received.startsWith(SIGNAL_PROBE_MARKER)) {
+				settle(true);
+			} else if (!SIGNAL_PROBE_MARKER.startsWith(received)) {
+				settle(false);
+			}
+			// Otherwise the bytes so far are a prefix of the marker: wait for more.
+		});
 		connection.once("end", () => settle(false));
 		connection.once("close", () => settle(false));
 		connection.on("error", () => settle(false));
@@ -592,7 +603,7 @@ export class IpcClient {
 			testSocket.on("connect", () => {
 				clearTimeout(timeout);
 				// Graceful close - we confirmed it's active. The marker tells the owner this is not a ready signal.
-				testSocket.end(`${SIGNAL_PROBE_MARKER}\n`);
+				testSocket.end(SIGNAL_PROBE_MARKER);
 				resolve(true);
 			});
 

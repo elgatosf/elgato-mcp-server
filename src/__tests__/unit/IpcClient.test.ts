@@ -670,7 +670,22 @@ describe("IpcClient", () => {
 
 			const probe = new MockSocket();
 			mockServer.simulateConnection(probe as any);
-			probe.simulateData(`${SIGNAL_PROBE_MARKER}\n`);
+			probe.simulateData(SIGNAL_PROBE_MARKER);
+			probe.emit("end");
+			await wait(10);
+
+			expect(connectSpy).not.toHaveBeenCalled();
+			expect(probe.ended).toBe(true);
+		});
+
+		it("should ignore a probe marker that arrives in several chunks", async () => {
+			const connectSpy = vi.spyOn(client, "connect");
+			client.startSignalListener();
+
+			const probe = new MockSocket();
+			mockServer.simulateConnection(probe as any);
+			probe.simulateData("pro");
+			probe.simulateData("be\n");
 			probe.emit("end");
 			await wait(10);
 
@@ -680,6 +695,13 @@ describe("IpcClient", () => {
 
 		it.each([
 			{ name: "sends data other than the probe marker", emit: (s: MockSocket) => s.simulateData("ready\n") },
+			{
+				name: "starts like the probe marker and then differs",
+				emit: (s: MockSocket) => {
+					s.simulateData("pro");
+					s.simulateData("xy");
+				},
+			},
 			{ name: "fails with an error", emit: (s: MockSocket) => s.simulateError(new Error("ECONNRESET")) },
 		])("should treat a signal connection that $name as a ready signal", async ({ emit }) => {
 			const connectSpy = vi.spyOn(client, "connect");

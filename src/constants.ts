@@ -26,8 +26,8 @@ export const REQUEST_TIMEOUT_MS = 30_000;
 /** Timeout for elicitation requests (ms). User input may take longer. */
 export const ELICITATION_TIMEOUT_MS = 5 * 60_000;
 
-/** First bytes a bridge writes when it probes another bridge's signal socket, so the probe is not taken as a ready signal. */
-export const SIGNAL_PROBE_MARKER = "probe";
+/** Bytes a bridge writes when it probes another bridge's signal socket, so the probe is not taken as a ready signal. */
+export const SIGNAL_PROBE_MARKER = "probe\n";
 
 /** How long a signal connection may stay open without data before it counts as a ready signal (ms). */
 export const SIGNAL_SETTLE_TIMEOUT_MS = 250;

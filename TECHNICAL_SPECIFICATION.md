@@ -732,7 +732,9 @@ signal when the peer closes it, sends any data other than the probe marker, or s
 
 A bridge that starts while another bridge owns the socket gets `EADDRINUSE` and probes the socket
 to tell a live owner from a stale file (macOS/Linux only). The probe writes `probe\n`
-(`SIGNAL_PROBE_MARKER`) and closes. The owner ignores connections that start with this marker.
+(`SIGNAL_PROBE_MARKER`) and closes. The owner ignores connections whose first bytes are this marker.
+The socket is a byte stream, so the owner collects bytes while they still match the start of the
+marker; the marker may arrive in several chunks.
 Bridges up to 0.1.7 probe without the marker; the owner still ignores those signals while it is
 connected (see 5.2.2).
 
@@ -919,8 +921,14 @@ if that attempt failed. Liveness probes from other bridges are ignored (see 4.4)
 ```typescript
 this.signalServer = this.serverFactory((connection) => this.handleSignalConnection(connection));
 
-// handleSignalConnection: settle once, on the first of data / end / close / error / 250 ms timeout.
-connection.once("data", (data) => settle(data.toString().startsWith(SIGNAL_PROBE_MARKER)));
+// handleSignalConnection: settle once, on the full marker, other data, end / close / error,
+// or the 250 ms timeout.
+connection.on("data", (data) => {
+    received += data.toString();
+    if (received.startsWith(SIGNAL_PROBE_MARKER)) settle(true);
+    else if (!SIGNAL_PROBE_MARKER.startsWith(received)) settle(false);
+    // else: still a prefix of the marker, wait for more bytes
+});
 connection.once("end", () => settle(false));
 // settle(isProbe): end the connection; if it was not a probe, call handleReadySignal().
 ```
