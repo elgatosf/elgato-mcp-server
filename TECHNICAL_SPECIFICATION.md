@@ -910,8 +910,9 @@ Instead of polling, the bridge uses a signal socket for reconnection:
 4. Tools are re-discovered after successful reconnection
 5. MCP clients receive `tools/list_changed` notification
 
-A ready signal while the client is connected or already connecting does nothing: no second socket
-is opened and `onConnected` does not fire. Liveness probes from other bridges are ignored (see 4.4).
+A ready signal while the client is connected does nothing: no second socket is opened and
+`onConnected` does not fire. A signal during a connect attempt waits for it and connects again only
+if that attempt failed. Liveness probes from other bridges are ignored (see 4.4).
 
 **Signal Socket Server:**
 
