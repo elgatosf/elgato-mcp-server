@@ -725,6 +725,17 @@ The bridge appends it to the `tools/call` error text (see the error result secti
 | macOS    | `/tmp/elgato-mcp-streamdeck.sock` | `/tmp/elgato-mcp-streamdeck-ready.sock` |
 | Windows  | `\\.\pipe\elgato-mcp-streamdeck`  | `\\.\pipe\elgato-mcp-streamdeck-ready`  |
 
+**Signal socket protocol.** Only one bridge process can own the signal socket. The app signals
+readiness by connecting to it; it needs to send nothing. The owner treats a connection as a ready
+signal when the peer closes it, sends any data other than the probe marker, or stays silent for
+250 ms (`SIGNAL_SETTLE_TIMEOUT_MS`).
+
+A bridge that starts while another bridge owns the socket gets `EADDRINUSE` and probes the socket
+to tell a live owner from a stale file (macOS/Linux only). The probe writes `probe\n`
+(`SIGNAL_PROBE_MARKER`) and closes. The owner ignores connections that start with this marker.
+Bridges up to 0.1.7 probe without the marker; the owner still ignores those signals while it is
+connected (see 5.2.2).
+
 ---
 
 ## 5. Implementation Requirements
@@ -788,6 +799,14 @@ server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
 **Connection Management:**
 
 - Uses Node.js `net` module for socket communication
+- Holds at most one socket per app. `connect()` keeps the current socket when connected, and
+  parallel calls share one attempt
+- Binds the `data`, `close` and `error` handlers to their own socket. Events from a socket that is
+  no longer current are ignored, so a stale stream never reaches the message buffer and a late
+  `close` never resets the live connection. Replacing a socket closes the old one and fails the
+  requests written to it
+- Decodes each socket's bytes with its own `StringDecoder`, so a multi-byte UTF-8 character split
+  across chunks stays intact
 - Implements request/response correlation via unique IDs
 - 30-second request timeout with automatic cleanup
 - 1MB maximum buffer size to prevent memory exhaustion
@@ -891,16 +910,18 @@ Instead of polling, the bridge uses a signal socket for reconnection:
 4. Tools are re-discovered after successful reconnection
 5. MCP clients receive `tools/list_changed` notification
 
+A ready signal while the client is connected or already connecting does nothing: no second socket
+is opened and `onConnected` does not fire. Liveness probes from other bridges are ignored (see 4.4).
+
 **Signal Socket Server:**
 
 ```typescript
-this.signalServer = net.createServer((clientSocket) => {
-    console.error("[MCP Bridge] Received ready signal from Stream Deck");
-    if (this.readyCallback) {
-        this.readyCallback();
-    }
-    clientSocket.end();
-});
+this.signalServer = this.serverFactory((connection) => this.handleSignalConnection(connection));
+
+// handleSignalConnection: settle once, on the first of data / end / close / error / 250 ms timeout.
+connection.once("data", (data) => settle(data.toString().startsWith(SIGNAL_PROBE_MARKER)));
+connection.once("end", () => settle(false));
+// settle(isProbe): end the connection; if it was not a probe, call handleReadySignal().
 ```
 
 #### 5.2.3 Connection Callback System
@@ -943,6 +964,9 @@ bridge.onResourcesChanged(async () => {
 
 - `notifications/tools/list_changed` - Triggers a tool refresh and invokes `onToolsChanged` callbacks
 - `notifications/resources/list_changed` - Triggers a resource refresh and invokes `onResourcesChanged` callbacks
+- Refreshes (`ClientManager.refreshAll()`) run one at a time. A refresh requested while one runs queues
+  exactly one more; all requests during that run share it. A burst of list-changed notifications
+  therefore causes at most one extra round of `tools_list` / `resources_list` / `server_info`
 - `notifications/resources/updated` - Forwards resource update notifications only to clients that have subscribed to the specific resource URI
 - All other notifications are forwarded to callbacks registered via `onClientNotification()`
 - Multiple callbacks can be registered; errors in one callback don't affect others
@@ -965,15 +989,20 @@ const timeout = setTimeout(() => {
 #### 5.3.2 Buffer Overflow Protection
 
 ```typescript
-private readonly maxBufferSize = 1024 * 1024;  // 1MB
+// One decoder per socket, created in setupSocketHandlers(socket).
+const decoder = new StringDecoder("utf8");
+socket.on("data", (data) => {
+  if (socket === this.socket) this.handleData(decoder.write(data));
+});
 
-private onData(data: Buffer | string): void {
-  this.buffer += data.toString();
-  if (this.buffer.length > this.maxBufferSize) {
-    console.error("[MCP Bridge] Buffer overflow, disconnecting");
-    this.disconnect();
+private handleData(chunk: string): void {
+  this.buffer += chunk;
+  if (this.buffer.length > MAX_BUFFER_SIZE) {  // 1MB
+    log.error("Buffer overflow, clearing buffer");
+    this.buffer = "";
     return;
   }
+  // ...split on "\n" and process each complete message
 }
 ```
 
